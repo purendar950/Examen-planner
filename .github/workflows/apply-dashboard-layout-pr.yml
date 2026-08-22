@@ -20,137 +20,132 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           fetch-depth: 0
 
-      - name: Append sidebar-aware dashboard CSS
+      - name: Append colorful dashboard card styling
         shell: bash
         run: |
           cat >> css/app.css <<'EOF'
 
 /* =====================================================================
-   DASHBOARD SIDEBAR-AWARE RESPONSIVE FIX
-   The desktop shell removes the sidebar from normal document flow, so
-   viewport breakpoints alone can leave dashboard cards squeezed.
+   STUDYPLANNER DASHBOARD — COLORFUL GLASS CARD SYSTEM
+   Keeps the existing dashboard structure and real data intact while
+   giving major dashboard cards distinct premium accent colors.
    ===================================================================== */
-@media (min-width: 901px) {
-  #app .main-content:has(#page-dashboard.active) {
-    container-type: inline-size;
-    container-name: dashboard-workspace;
-    min-width: 0;
-  }
-
-  .fintech-dashboard .fin-hero-grid {
-    grid-template-columns: minmax(300px, 1fr) minmax(360px, 1.18fr) minmax(220px, .82fr);
-    min-width: 0;
-  }
-
-  .fintech-dashboard .fin-readiness-card,
-  .fintech-dashboard .fin-focus-card,
-  .fintech-dashboard .fin-quick-card {
-    min-width: 0;
-    overflow: hidden;
-  }
-
-  .fintech-dashboard .fin-readiness-main {
-    grid-template-columns: minmax(112px, 124px) minmax(0, 1fr);
-    gap: 1rem;
-    margin-top: 1.15rem;
-  }
-
-  .fintech-dashboard .fin-score-ring,
-  .fintech-dashboard .fin-score-ring svg {
-    width: 112px;
-    height: 112px;
-  }
-
-  .fintech-dashboard .fin-readiness-copy,
-  .fintech-dashboard .fin-focus-card .dash-todo-name {
-    min-width: 0;
-  }
-
-  .fintech-dashboard .fin-readiness-copy h2 {
-    font-size: clamp(1.2rem, 2vw, 1.65rem);
-    overflow-wrap: anywhere;
-  }
-
-  .fintech-dashboard .fin-readiness-copy > p {
-    max-width: none;
-  }
-
-  .fintech-dashboard .fin-readiness-metrics {
-    gap: .35rem;
-  }
-
-  .fintech-dashboard .fin-readiness-metrics > div {
-    min-width: 0;
-    padding: .58rem .55rem;
-  }
-
-  .fintech-dashboard .fin-readiness-metrics span,
-  .fintech-dashboard .fin-readiness-metrics strong {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .fintech-dashboard .fin-focus-card .dash-todo-item {
-    min-width: 0;
-  }
-
-  .fintech-dashboard .fin-focus-card .dash-todo-tag {
-    max-width: min(170px, 32%);
-  }
-
-  .fintech-dashboard .fin-stat-grid,
-  .fintech-dashboard .fin-stat-card {
-    min-width: 0;
-  }
+.fintech-dashboard {
+  --dash-green: #00e5a0;
+  --dash-blue: #3b9cff;
+  --dash-cyan: #16d9e3;
+  --dash-purple: #a855f7;
+  --dash-violet: #c084fc;
+  --dash-amber: #fbbf24;
+  --dash-orange: #fb923c;
+  --dash-pink: #ec4899;
+  --dash-teal: #14b8a6;
 }
 
-@container dashboard-workspace (max-width: 980px) {
-  .fintech-dashboard .fin-hero-grid {
-    grid-template-columns: minmax(270px, .95fr) minmax(340px, 1.15fr);
-  }
-
-  .fintech-dashboard .fin-quick-card {
-    grid-column: 1 / -1;
-    min-height: 0;
-  }
-
-  .fintech-dashboard .fin-quick-card .fin-stat-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
+.fintech-dashboard .fin-readiness-card,
+.fintech-dashboard .fin-focus-card,
+.fintech-dashboard .fin-quick-card,
+.fintech-dashboard .fin-daily-card,
+.fintech-dashboard .fin-pro-card,
+.fintech-dashboard .fin-operation-card,
+.fintech-dashboard .fin-weekly-card,
+.fintech-dashboard .fin-subject-card,
+.fintech-dashboard .fin-activity-card {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.045), rgba(255,255,255,.012)),
+    var(--card);
+  border: 1px solid rgba(255,255,255,.085);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.045), 0 12px 35px rgba(0,0,0,.16);
+  transition: transform .22s ease, border-color .22s ease, box-shadow .22s ease;
 }
 
-@container dashboard-workspace (max-width: 760px) {
-  .fintech-dashboard .fin-hero-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .fintech-dashboard .fin-quick-card {
-    grid-column: auto;
-  }
-
-  .fintech-dashboard .fin-readiness-main {
-    grid-template-columns: 112px minmax(0, 1fr);
-  }
+.fintech-dashboard .fin-readiness-card::before,
+.fintech-dashboard .fin-focus-card::before,
+.fintech-dashboard .fin-quick-card::before,
+.fintech-dashboard .fin-daily-card::before,
+.fintech-dashboard .fin-pro-card::before,
+.fintech-dashboard .fin-operation-card::before,
+.fintech-dashboard .fin-weekly-card::before,
+.fintech-dashboard .fin-subject-card::before,
+.fintech-dashboard .fin-activity-card::before {
+  content: '';
+  position: absolute;
+  inset: -45% -20% auto auto;
+  width: 190px;
+  height: 190px;
+  border-radius: 50%;
+  background: var(--card-glow, rgba(0,229,160,.12));
+  filter: blur(42px);
+  opacity: .65;
+  pointer-events: none;
 }
 
-@container dashboard-workspace (max-width: 520px) {
-  .fintech-dashboard .fin-readiness-main {
-    grid-template-columns: 1fr;
-  }
+.fintech-dashboard .fin-readiness-card:hover,
+.fintech-dashboard .fin-focus-card:hover,
+.fintech-dashboard .fin-quick-card:hover,
+.fintech-dashboard .fin-daily-card:hover,
+.fintech-dashboard .fin-pro-card:hover,
+.fintech-dashboard .fin-operation-card:hover,
+.fintech-dashboard .fin-weekly-card:hover,
+.fintech-dashboard .fin-subject-card:hover,
+.fintech-dashboard .fin-activity-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--card-accent, rgba(255,255,255,.16));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 16px 42px rgba(0,0,0,.22), 0 0 24px var(--card-glow, rgba(0,229,160,.08));
+}
 
-  .fintech-dashboard .fin-readiness-metrics {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
+/* Hero row */
+.fintech-dashboard .fin-readiness-card { --card-accent: rgba(0,229,160,.45); --card-glow: rgba(0,229,160,.16); }
+.fintech-dashboard .fin-focus-card { --card-accent: rgba(59,156,255,.45); --card-glow: rgba(59,156,255,.14); }
+.fintech-dashboard .fin-quick-card { --card-accent: rgba(168,85,247,.45); --card-glow: rgba(168,85,247,.14); }
+
+/* Middle row */
+.fintech-dashboard .fin-daily-card { --card-accent: rgba(20,184,166,.48); --card-glow: rgba(20,184,166,.15); }
+.fintech-dashboard .fin-pro-card { --card-accent: rgba(192,132,252,.48); --card-glow: rgba(192,132,252,.16); }
+
+/* Study operations */
+.fintech-dashboard .fin-operation-card:nth-child(1) { --card-accent: rgba(168,85,247,.5); --card-glow: rgba(168,85,247,.14); }
+.fintech-dashboard .fin-operation-card:nth-child(2) { --card-accent: rgba(59,156,255,.5); --card-glow: rgba(59,156,255,.14); }
+.fintech-dashboard .fin-operation-card:nth-child(3) { --card-accent: rgba(0,229,160,.5); --card-glow: rgba(0,229,160,.14); }
+.fintech-dashboard .fin-operation-card:nth-child(4) { --card-accent: rgba(251,191,36,.5); --card-glow: rgba(251,191,36,.14); }
+
+/* Performance + subject sections */
+.fintech-dashboard .fin-weekly-card { --card-accent: rgba(22,217,227,.45); --card-glow: rgba(22,217,227,.12); }
+.fintech-dashboard .fin-subject-card:nth-child(1) { --card-accent: rgba(59,156,255,.48); --card-glow: rgba(59,156,255,.13); }
+.fintech-dashboard .fin-subject-card:nth-child(2) { --card-accent: rgba(22,217,227,.48); --card-glow: rgba(22,217,227,.13); }
+.fintech-dashboard .fin-subject-card:nth-child(3) { --card-accent: rgba(251,146,60,.5); --card-glow: rgba(251,146,60,.14); }
+.fintech-dashboard .fin-subject-card:nth-child(4) { --card-accent: rgba(192,132,252,.5); --card-glow: rgba(192,132,252,.14); }
+.fintech-dashboard .fin-activity-card { --card-accent: rgba(236,72,153,.42); --card-glow: rgba(236,72,153,.10); }
+
+/* Give section labels and small icons a matching accent without recoloring data values. */
+.fintech-dashboard .fin-readiness-card .dash-section-icon { color: var(--dash-green); }
+.fintech-dashboard .fin-focus-card .dash-section-icon { color: var(--dash-blue); }
+.fintech-dashboard .fin-quick-card .dash-section-icon { color: var(--dash-purple); }
+.fintech-dashboard .fin-daily-card .dash-section-icon { color: var(--dash-teal); }
+.fintech-dashboard .fin-pro-card .dash-section-icon { color: var(--dash-violet); }
+
+/* Keep glow subtle on touch devices. */
+@media (hover:none) {
+  .fintech-dashboard .fin-readiness-card:hover,
+  .fintech-dashboard .fin-focus-card:hover,
+  .fintech-dashboard .fin-quick-card:hover,
+  .fintech-dashboard .fin-daily-card:hover,
+  .fintech-dashboard .fin-pro-card:hover,
+  .fintech-dashboard .fin-operation-card:hover,
+  .fintech-dashboard .fin-weekly-card:hover,
+  .fintech-dashboard .fin-subject-card:hover,
+  .fintech-dashboard .fin-activity-card:hover { transform: none; }
 }
 EOF
 
-      - name: Commit fix and remove workflow
+      - name: Commit styling and remove workflow
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add css/app.css
           git rm .github/workflows/apply-dashboard-layout-pr.yml
-          git commit -m "fix: make dashboard responsive to sidebar width [dashboard-layout-fix-applied]"
+          git commit -m "style: add colorful dashboard card glow [layout-fix-applied]"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
