@@ -26,13 +26,26 @@
   function validId(id) { return /^[A-Za-z0-9_-]{11}$/.test(String(id || '')); }
   function currentId() {
     try {
-      var id = (typeof ytCurrentVideoId !== 'undefined' && ytCurrentVideoId) || ronflixId;
-      return String(id || '').replace(/^playlist_/, '');
-    } catch (e) { return ronflixId; }
+      var id = (typeof ytCurrentVideoId !== 'undefined' && ytCurrentVideoId) || '';
+      id = String(id || '').replace(/^playlist_/, '');
+      if (validId(id)) return id;
+      if (typeof ytPlayer !== 'undefined' && ytPlayer && typeof ytPlayer.getVideoData === 'function') {
+        var data = ytPlayer.getVideoData() || {};
+        if (validId(data.video_id)) return String(data.video_id);
+      }
+      return validId(ronflixId) ? ronflixId : '';
+    } catch (e) { return validId(ronflixId) ? ronflixId : ''; }
   }
   function currentTitle() {
-    try { return (typeof ytCurrentVideoTitle !== 'undefined' && ytCurrentVideoTitle) || ronflixTitle || 'YouTube video'; }
-    catch (e) { return ronflixTitle || 'YouTube video'; }
+    try {
+      var title = (typeof ytCurrentVideoTitle !== 'undefined' && ytCurrentVideoTitle) || '';
+      if (title && title !== 'Playlist' && title !== 'Unknown Video') return title;
+      if (typeof ytPlayer !== 'undefined' && ytPlayer && typeof ytPlayer.getVideoData === 'function') {
+        var data = ytPlayer.getVideoData() || {};
+        if (data.title) return String(data.title);
+      }
+      return title || ronflixTitle || 'YouTube video';
+    } catch (e) { return ronflixTitle || 'YouTube video'; }
   }
   function isActive() {
     return !!(ronflixActiveNow && ronflixVideo && ronflixVideo.style.display !== 'none');

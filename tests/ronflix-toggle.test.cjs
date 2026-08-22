@@ -93,6 +93,26 @@ vm.runInContext(fs.readFileSync('js/features/ronflix-player.js', 'utf8'), contex
   const restoredIframe = iframe.querySelector('iframe');
   assert.ok(restoredIframe, 'normal mode must restore an iframe when the API player is not ready');
   assert.match(restoredIframe.src, new RegExp(videoId));
+
+  // A playlist item is stored as playlist_<id>, but the IFrame API exposes the
+  // actual video currently playing through getVideoData(). RonFlix must use
+  // that video ID instead of rejecting the toggle as a non-video playlist ID.
+  window.ytCurrentVideoId = 'playlist_PL123456789';
+  window.ytCurrentVideoTitle = 'Playlist';
+  window.ytPlayerReady = true;
+  window.ytPlayer = {
+    getVideoData: () => ({ video_id: videoId, title: 'Playlist item' }),
+    pauseVideo: () => {},
+  };
+  window.ytToggleRonflix();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(streamCalls, 2, 'a playlist item must be playable through RonFlix');
+  assert.equal(window.ytRonflixGetState().active, true);
+  assert.equal(toggle.textContent, '◈ RonFlix ON');
+
+  window.ytToggleRonflix();
+  assert.equal(toggle.textContent, '◈ RonFlix OFF');
+  assert.deepEqual(calls.at(-1), { type: 'video', id: videoId }, 'playlist item must return to the same normal video');
   console.log('ronflix toggle harness passed');
 })().catch((error) => {
   console.error(error);
