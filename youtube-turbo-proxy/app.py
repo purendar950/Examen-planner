@@ -134,6 +134,7 @@ POT_BASE_URL = os.environ.get("POT_BASE_URL", "http://127.0.0.1:4416")
 CACHE_TTL = int(os.environ.get("CACHE_TTL", "18000"))       # 5h (URLs expire ~6h)
 MAX_HEIGHT = int(os.environ.get("MAX_HEIGHT", "720"))       # cap resolution
 REQUEST_TIMEOUT = 20
+VIDEO_CACHE_MAX = max(4, int(os.environ.get("VIDEO_CACHE_MAX", "16")))
 
 # How often to re-read cookies from Firestore so an admin's paste in the panel
 # takes effect without a redeploy. Default 10 min.
@@ -365,7 +366,13 @@ if _fb_db:
     threading.Thread(target=_cookie_refresh_loop, daemon=True).start()
 
 # ------------------------------------------------------------------ cache
-# key: video_id -> {"ts": epoch, "info": {...normalized...}}
+def _prune_ts_cache(cache, max_entries):
+    oldest = sorted(cache, key=lambda key: cache[key].get("ts", 0))
+    for key in oldest[:max(0, len(cache) - max_entries)]:
+        cache.pop(key, None)
+
+
+# key: video_id -> {"ts", "info", "compact"}
 _cache = {}
 _cache_lock = threading.Lock()
 
@@ -378,6 +385,7 @@ _extract_sem = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_EXTRACT", 
 # This is what keeps YouTube fetches rare: the first viewer of a video pays the
 # fetch; everyone after (across all users) gets a cache hit. key: "id:lang".
 TRANSCRIPT_TTL = int(os.environ.get("TRANSCRIPT_TTL", str(30 * 24 * 3600)))  # 30 days
+TRANSCRIPT_CACHE_MAX = max(4, int(os.environ.get("TRANSCRIPT_CACHE_MAX", "10")))
 _transcript_cache = {}
 _transcript_lock = threading.Lock()
 
@@ -855,12 +863,26 @@ def _normalize(info):
     }
 
 
+def _compact_extract(raw):
+    return {
+        "formats": [
+            {"format_id": str(fmt.get("format_id")), "url": fmt.get("url")}
+            for fmt in (raw.get("formats") or [])
+            if fmt.get("format_id") and fmt.get("url")
+        ],
+        "subtitles": raw.get("subtitles") or {},
+        "automatic_captions": raw.get("automatic_captions") or {},
+        "title": raw.get("title"),
+        "language": raw.get("language"),
+    }
+
+
 def _extract(video_id, force=False):
     now = time.time()
     with _cache_lock:
         hit = _cache.get(video_id)
         if hit and not force and (now - hit["ts"] < CACHE_TTL):
-            return hit["info"], hit["raw"]
+            return hit["info"], hit["compact"]
 
     # Extraction spawns a Deno subprocess (signature/n-sig solving) which is the
     # main memory/CPU spike. Serialize it so a burst of requests doesn't spawn
@@ -871,19 +893,22 @@ def _extract(video_id, force=False):
         with _cache_lock:
             hit = _cache.get(video_id)
             if hit and not force and (time.time() - hit["ts"] < CACHE_TTL):
-                return hit["info"], hit["raw"]
+                return hit["info"], hit["compact"]
 
         url = "https://www.youtube.com/watch?v=" + video_id
         with yt_dlp.YoutubeDL(_base_ydl_opts()) as ydl:
             raw = ydl.extract_info(url, download=False)
         info = _normalize(raw)
+        compact = _compact_extract(raw)
+        del raw
         with _cache_lock:
-            _cache[video_id] = {"ts": time.time(), "info": info, "raw": raw}
-    return info, raw
+            _cache[video_id] = {"ts": time.time(), "info": info, "compact": compact}
+            _prune_ts_cache(_cache, VIDEO_CACHE_MAX)
+    return info, compact
 
 
-def _direct_url(raw, itag):
-    for f in raw.get("formats", []):
+def _direct_url(extraction, itag):
+    for f in extraction.get("formats", []):
         if str(f.get("format_id")) == str(itag) and f.get("url"):
             return f["url"]
     return None
@@ -1080,6 +1105,7 @@ def _extract_transcript(video_id, lang="auto", force=False, persist=True):
         if fs and fs.get("segments"):
             with _transcript_lock:
                 _transcript_cache[ckey] = {"ts": time.time(), "data": fs}
+                _prune_ts_cache(_transcript_cache, TRANSCRIPT_CACHE_MAX)
             return fs
 
     # An explicit language that misses is still very likely to be on disk under
@@ -1097,6 +1123,7 @@ def _extract_transcript(video_id, lang="auto", force=False, persist=True):
             if want and want == got:
                 with _transcript_lock:
                     _transcript_cache[ckey] = {"ts": time.time(), "data": shared}
+                    _prune_ts_cache(_transcript_cache, TRANSCRIPT_CACHE_MAX)
                 return shared
 
     with _extract_sem:
@@ -1155,6 +1182,7 @@ def _extract_transcript(video_id, lang="auto", force=False, persist=True):
         }
         with _transcript_lock:
             _transcript_cache[ckey] = {"ts": time.time(), "data": data}
+            _prune_ts_cache(_transcript_cache, TRANSCRIPT_CACHE_MAX)
         if persist and data.get("segments"):  # persist only successful transcripts
             _transcript_put(fs_id, data)
     return data
@@ -1468,6 +1496,7 @@ _NOTES_CONTINUE = ("Continue the notes from EXACTLY where you stopped (finish th
                    "remark \u2014 just carry straight on. Keep writing in the SAME "
                    "language and SAME script you were instructed to use.")
 STUDY_TTL = int(os.environ.get("STUDY_TTL", str(30 * 24 * 3600)))  # 30 days
+STUDY_CACHE_MAX = max(4, int(os.environ.get("STUDY_CACHE_MAX", "12")))
 # Version the MCQ-notes cache independently. The previous prompt could only
 # extract questions already stated in a transcript, so it cached conversational
 # refusals for normal explanatory lectures. A new cache namespace makes every
@@ -1557,6 +1586,12 @@ def _requirements_instr(requirements, for_design=False):
 
 _study_cache = {}
 _study_lock = threading.Lock()
+
+
+def _study_cache_put(ckey, data):
+    with _study_lock:
+        _study_cache[ckey] = {"ts": time.time(), "data": data}
+        _prune_ts_cache(_study_cache, STUDY_CACHE_MAX)
 
 # ---- resumable text-generation jobs --------------------------------------
 # A browser SSE request is deliberately *not* the owner of generation. The job
@@ -1836,6 +1871,14 @@ def _cleanup_study_jobs():
                        if expiry < time.time()]
         for jid in stale_stops:
             _study_job_stop_tombstones.pop(jid, None)
+        terminal = [jid for jid, job in _study_jobs.items()
+                    if job.get("status") in ("completed", "stopped", "failed")]
+        job_cache_max = max(4, int(os.environ.get("STUDY_JOB_CACHE_MAX", "12")))
+        excess = max(0, len(terminal) - job_cache_max)
+        if excess:
+            terminal.sort(key=lambda jid: _study_jobs[jid].get("updated_at", 0))
+            for jid in terminal[:excess]:
+                _study_jobs.pop(jid, None)
 
 
 def _valid_study_job_id(value):
@@ -7019,8 +7062,7 @@ def api_study():
     fs = None if force else _study_get(fs_id)
     if fs:
         fs["cached"] = True
-        with _study_lock:
-            _study_cache[ckey] = {"ts": time.time(), "data": fs}
+        _study_cache_put(ckey, fs)
         return jsonify(fs)
 
     # rate limit only NEW generations (cached hits above are free). Skip for
@@ -7083,8 +7125,7 @@ def api_study():
             "cached": False}
     data.update(result)
     data.update(gen_meta)          # design_provider / design_model / design_ms
-    with _study_lock:
-        _study_cache[ckey] = {"ts": time.time(), "data": data}
+    _study_cache_put(ckey, data)
     # persist for next time (all users): body -> object storage, index -> Firestore
     # (or Firestore-only if S3 is off). Surface whether it actually saved.
     data["persisted"] = _study_put(fs_id, data)
@@ -7163,8 +7204,7 @@ def api_study_stream():
             fs = _study_get(fs_id)
             if fs:
                 fs["cached"] = True
-                with _study_lock:
-                    _study_cache[ckey] = {"ts": time.time(), "data": fs}
+                _study_cache_put(ckey, fs)
                 cached = fs
     if cached is not None:
         cdata = cached
@@ -7253,8 +7293,7 @@ def api_study_stream():
                     "requirements": requirements,
                     "cached": False, "content": content}
             data.update(gen_meta)      # which model styled it, if any
-            with _study_lock:
-                _study_cache[ckey] = {"ts": time.time(), "data": data}
+            _study_cache_put(ckey, data)
             persisted = _study_put(fs_id, data)     # cache ONLY on clean finish
         yield _sse("done", {"persisted": persisted})
 
@@ -7279,8 +7318,7 @@ def _study_job_cached_result(ckey, fs_id, force):
     saved = _study_get(fs_id)
     if saved:
         saved["cached"] = True
-        with _study_lock:
-            _study_cache[ckey] = {"ts": time.time(), "data": saved}
+        _study_cache_put(ckey, saved)
     return saved
 
 
@@ -7389,8 +7427,7 @@ def _run_study_job(job_id):
                 "design_model": job.get("design_model") or "",
                 "design_fallback": bool(job.get("design_fallback")),
                 "requirements": job.get("requirements") or ""}
-        with _study_lock:
-            _study_cache[job["ckey"]] = {"ts": time.time(), "data": data}
+        _study_cache_put(job["ckey"], data)
         persisted = _study_put(job["fs_id"], data)
         with _study_jobs_lock:
             job["persisted"] = persisted
@@ -7638,7 +7675,7 @@ STUDY_BUNDLE_MAX_VIDEOS = max(2, min(40, int(os.environ.get("STUDY_BUNDLE_MAX_VI
 # A bundle holds its worker for minutes. Bound how many run at once per instance
 # so they can never starve single-video generation or the control endpoints.
 _study_bundle_worker_sem = threading.Semaphore(
-    max(1, int(os.environ.get("STUDY_BUNDLE_WORKERS", "2"))))
+    max(1, int(os.environ.get("STUDY_BUNDLE_WORKERS", "1"))))
 # How many lectures ONE notebook reads at the same time. Lectures are entirely
 # independent — own transcript download, own AI stream — so reading them strictly
 # one after another made a notebook cost (lectures x per-lecture time) by
@@ -7725,8 +7762,7 @@ def _bundle_cached_note_result(ckey, fs_id, provider, model):
     if not _bundle_note_cache_matches(saved, provider, model):
         return {}
     saved["cached"] = True
-    with _study_lock:
-        _study_cache[ckey] = {"ts": time.time(), "data": saved}
+    _study_cache_put(ckey, saved)
     return saved
 
 
@@ -8760,8 +8796,7 @@ def _bundle_lecture_note(job, item, index, emitter=None):
     # The canonical key is route-agnostic, so the newly generated copy must replace
     # process memory as well as persistence. Otherwise an older same-route value
     # can be resurrected by the next rebuild.
-    with _study_lock:
-        _study_cache[ckey] = {"ts": time.time(), "data": note_data}
+    _study_cache_put(ckey, note_data)
     _bundle_update_item(job, vid, "ready", "", "generated")
     return {"label": item["label"], "video_id": vid, "title": title,
             "content": content}
@@ -8820,8 +8855,7 @@ def _run_study_bundle_job(job_id):
                 "video_ids": list(job.get("video_ids") or []),
                 "items": items, "cached": False, "content": content}
             persisted = _study_put(job["fs_id"], data)
-            with _study_lock:
-                _study_cache[job["ckey"]] = {"ts": time.time(), "data": data}
+            _study_cache_put(job["ckey"], data)
             with _study_jobs_lock:
                 job["persisted"] = persisted
                 job["status"] = "completed"

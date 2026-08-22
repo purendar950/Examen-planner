@@ -43,6 +43,13 @@ def fs_doc_id(*parts):
 
 def load_bundle():
     lock = threading.RLock()
+    study_lock = threading.Lock()
+    study_cache = {}
+
+    def study_cache_put(key, data):
+        with study_lock:
+            study_cache[key] = {"ts": time.time(), "data": data}
+
     ns = {
         "os": os,
         "re": re,
@@ -57,8 +64,9 @@ def load_bundle():
         "_load_ai_limits": lambda: {"studyBundleMaxVideos": 15},
         "_job_force": lambda value: str(value or "").strip().lower() in ("1", "true", "yes"),
         "_study_jobs_lock": lock,
-        "_study_lock": threading.Lock(),
-        "_study_cache": {},
+        "_study_lock": study_lock,
+        "_study_cache": study_cache,
+        "_study_cache_put": study_cache_put,
         "STUDY_TTL": 3600,
         "_study_job_persist": lambda *args, **kwargs: True,
         "_study_exists": lambda fs_id: fs_id == "legacy-ready",
@@ -459,6 +467,12 @@ def make_map_ns():
     """Fresh namespace per map-stage scenario, so cache state cannot leak."""
     emit_lock = threading.Lock()
     lock = threading.RLock()
+    study_lock = threading.Lock()
+    study_cache = {}
+
+    def study_cache_put(key, data):
+        with study_lock:
+            study_cache[key] = {"ts": time.time(), "data": data}
 
     def emit(job, text):
         if not text:
@@ -489,8 +503,9 @@ def make_map_ns():
         "_timestamped_transcript": lambda segments: "[0:10] spoken",
         "_stream_study_text": lambda *args, **kwargs: iter(["## Topic\n\n- Fresh notes [0:10]"]),
         "_study_jobs_lock": lock,
-        "_study_lock": threading.Lock(),
-        "_study_cache": {},
+        "_study_lock": study_lock,
+        "_study_cache": study_cache,
+        "_study_cache_put": study_cache_put,
         "time": time,
         "_ai_display_model": lambda ai: ai["model"],
         "_ai_display_provider": lambda ai: ai["provider"],
