@@ -946,10 +946,30 @@ def _transcript_ydl_opts(client):
     ea = dict(opts.get("extractor_args") or {})
     ea["youtube"] = {"player_client": [client]}
     opts["extractor_args"] = ea
-    # Format selection: use worst quality to avoid "format not available" errors
-    # when we're only extracting captions (skip_download=True). This prevents
-    # yt-dlp from erroring out if a specific format is unavailable.
-    opts["format"] = "worst"
+    # THE reason transcripts died with "Requested format is not available".
+    #
+    # skip_download=True does NOT skip format SELECTION. extract_info() still
+    # runs YoutubeDL.process_video_result(), which selects a format and, when
+    # nothing matches, raises:
+    #     "Requested format is not available. Use --list-formats ..."
+    # That happens whenever YouTube hands back an empty/unplayable format list —
+    # i.e. a bot-gated datacenter IP, a missing/expired PO token, or a JS
+    # runtime that could not solve the signature challenge. All three are about
+    # the VIDEO STREAMS, which the transcript path never touches: it only needs
+    # info["subtitles"] / info["automatic_captions"], and yt-dlp fills those in
+    # BEFORE format selection runs. So a stream-side failure was aborting an
+    # extraction whose caption data had already been collected successfully.
+    #
+    # ignore_no_formats_error downgrades both that raise and the earlier
+    # raise_no_formats() ("No video formats found!") to warnings, so the caption
+    # tracks we actually came for survive. Note this ONLY belongs on the
+    # caption path — /api/info and /api/stream genuinely need real formats and
+    # must keep failing loudly when there are none.
+    #
+    # Picking a lenient format string instead (e.g. "worst") does NOT help: with
+    # an empty candidate list every selector matches nothing and the same error
+    # is raised.
+    opts["ignore_no_formats_error"] = True
     return opts
 
 
@@ -1145,15 +1165,30 @@ def _extract_transcript(video_id, lang="auto", force=False, persist=True):
         url = "https://www.youtube.com/watch?v=" + video_id
         raw = None
         last_err = None
-        for client in ("android", "web"):
+        # More clients than before: the empty-format-list condition that used to
+        # abort this loop is the same bot-gating that can also strip caption
+        # tracks from one client while another still returns them. Ordered by
+        # how reliably each yields captions without cookies; android stays first.
+        for client in ("android", "ios", "mweb", "tv", "web"):
             try:
                 with yt_dlp.YoutubeDL(_transcript_ydl_opts(client)) as ydl:
-                    raw = ydl.extract_info(url, download=False)
-                if raw.get("subtitles") or raw.get("automatic_captions"):
-                    break                     # got tracks — stop here
-            except yt_dlp.utils.DownloadError as exc:
+                    candidate = ydl.extract_info(url, download=False)
+            except Exception as exc:          # noqa: BLE001
+                # Any client can fail on its own (gating, PO token, JS runtime).
+                # Remember why and let the next one try.
                 last_err = exc
+                log.warning("transcript extract failed on client=%s: %s", client, exc)
                 continue
+            if candidate is None:
+                continue
+            if candidate.get("subtitles") or candidate.get("automatic_captions"):
+                raw = candidate
+                break                         # got tracks — stop here
+            # Metadata came back but no caption tracks. Keep it only as a
+            # fallback so we can still report title/language, and try the next
+            # client in case this one was caption-gated.
+            if raw is None:
+                raw = candidate
         if raw is None:
             raise last_err or RuntimeError("extraction failed")
 

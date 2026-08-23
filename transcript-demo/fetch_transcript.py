@@ -65,7 +65,12 @@ def fetch(video: str, lang: str = "en"):
             "quiet": True,
             "no_warnings": True,
             "noprogress": True,
-            "format": "worst",              # Avoid "format not available" errors when extracting captions
+            # skip_download does NOT skip format SELECTION, so a video whose
+            # stream list comes back empty/unplayable (bot-gated IP, missing PO
+            # token, unsolved JS challenge) still aborts with "Requested format
+            # is not available" even though captions were already extracted.
+            # Downgrade that to a warning — this path never uses the streams.
+            "ignore_no_formats_error": True,
             # KEY: the 'android' player client bypasses YouTube's soft
             # caption-gate far better than 'web' when running without cookies.
             "extractor_args": {"youtube": {"player_client": ["android"]}},
