@@ -53,8 +53,10 @@ HTTPS, and it refuses plaintext backends in two independent places:
 
 So `http://192.168.1.5:8080` cannot be entered in the admin panel at all, and a
 LAN IP would not work off your home Wi-Fi anyway. Cloudflare Tunnel solves
-both: it gives you a stable HTTPS hostname and needs no port forwarding, no
-static IP, and no inbound firewall rule.
+both: it gives you HTTPS with no port forwarding, static IP, or inbound
+firewall rule. A named tunnel gives a permanent hostname when you own a domain;
+the automatic Quick Tunnel mode below needs no domain and safely republishes
+its new random hostname after every restart.
 
 ## Install
 
@@ -124,7 +126,63 @@ already manages.
 
 ## Expose it with Cloudflare Tunnel
 
-You need a domain on Cloudflare (a cheap one is fine). Inside Ubuntu:
+### No domain: automatic Quick Tunnel
+
+A Quick Tunnel URL itself is **not permanent**. Cloudflare assigns a new random
+`trycloudflare.com` hostname whenever the tunnel process starts. ExamZen makes
+the setup permanent instead: after every boot or tunnel-process restart it
+discovers the new hostname, verifies the public proxy, and transactionally publishes it to
+Firestore `config/turbo`. Signed-in clients receive the change automatically.
+
+Inside Ubuntu, enable it once in `server.env`:
+
+```sh
+sed -i -E '/^export (TUNNEL_NAME|QUICK_TUNNEL|QUICK_TUNNEL_ACTIVATE_ROLES)=/d' server.env
+cat >> server.env <<'EOF'
+export TUNNEL_NAME=""
+export QUICK_TUNNEL=1
+export QUICK_TUNNEL_ACTIVATE_ROLES="media,ai"
+EOF
+```
+
+Then restart normally:
+
+```sh
+./stop-all.sh
+./start-all.sh
+```
+
+The helper exposes only the proxy on port `8080`. It waits for both local and
+public `/health`, then upserts one stable `termux-quick-tunnel` registry entry
+instead of accumulating expired URLs. Media and AI are set to `manual`
+preference, so the phone is tried first while existing Render servers remain
+available as fallbacks. Other Firestore settings and registry entries are
+preserved. The browser Telegram relay stays on Render; port `3000` is not
+published by this Quick Tunnel.
+
+The registry can contain at most 12 servers, so the first enablement needs one
+free slot (at most 11 non-Quick-Tunnel entries). If all 12 slots are occupied,
+`logs/tunnel.log` explains which entry to remove; the helper keeps retrying and
+existing Render routing remains unchanged. During the short interval between a
+tunnel failure and replacement publication, a request may try the expired
+manual-preference URL before falling back. Cloudflare normally rejects it
+quickly, but a network timeout can delay that request.
+
+Check URL discovery and publication with:
+
+```sh
+tail -f /opt/examzen/termux-server/logs/tunnel.log
+```
+
+If `cloudflared` exits, the existing supervisor restarts it with exponential
+backoff and publishes the replacement URL. Termux:Boot starts the same workflow
+after a phone reboot. A non-empty `TUNNEL_NAME` always takes precedence over
+Quick Tunnel mode.
+
+### Owned domain: named tunnel
+
+A named tunnel gives a permanent hostname. You need a domain on Cloudflare.
+Inside Ubuntu:
 
 ```sh
 cloudflared tunnel login
@@ -142,11 +200,6 @@ runs the tunnel alongside the services.
 routing on a single hostname does not work here: the admin panel rejects any
 backend URL with a pathname other than `/`.
 
-For a throwaway test without a domain, `cloudflared tunnel --url
-http://127.0.0.1:8080` prints a random `trycloudflare.com` URL. It covers one
-service only and the URL changes every restart, so it is for smoke-testing, not
-for running the app.
-
 Verify from outside:
 
 ```sh
@@ -158,6 +211,13 @@ Verify from outside:
 Firestore is authoritative and re-overwrites `localStorage` on essentially
 every request, so the admin panel is the real switch — editing `localStorage`
 alone will not stick.
+
+When `QUICK_TUNNEL=1`, proxy cutover is automatic: the publisher updates the
+authoritative registry only after the new public URL passes health checks. Skip
+step 1 below. Also leave the browser's Telegram bot URL on Render because Quick
+Tunnel mode intentionally exposes only the proxy, not port `3000`.
+
+The manual steps below are for an owned-domain named tunnel.
 
 **1. Admin → configuration → Server Role Routing** (covers all proxy traffic)
 
@@ -171,7 +231,8 @@ Route split, from `backendRouteForPath`: `ai` covers `/api/study*`,
 `/api/status`. **Everything else is `media`.** A server enabled for only one
 role will not serve the other.
 
-**2. The bot URL** is not in that registry. In the browser console:
+**2. For a named bot tunnel only**, the bot URL is not in that registry. In the
+browser console:
 
 ```js
 localStorage.setItem('telegramBotUrl', 'https://examzen-bot.yourdomain.com');
@@ -212,7 +273,9 @@ head -3 ~/.termux/boot/start-examzen     # confirm it landed
 
 The supervisor restarts a crashed service with exponential backoff (2s → 60s
 ceiling), logs each service to `logs/<name>.log`, and kills whole process
-groups on shutdown so nothing is orphaned holding a port.
+groups on shutdown so nothing is orphaned holding a port. With Quick Tunnel
+enabled, the tunnel supervisor also discovers and republishes a fresh URL after
+each boot or tunnel-process restart.
 
 ### Retire the Render keepalive
 
