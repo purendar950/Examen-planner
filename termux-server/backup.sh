@@ -236,9 +236,23 @@ if [ "$WITH_SECRETS" -eq 1 ]; then
       opt/examzen/termux-server/server.env \
       opt/examzen-secrets/firebase-service-account.json \
     || die "Could not create the portable credentials archive."
-  if [ -z "${GPG_TTY:-}" ] && GPG_TTY="$(tty 2>/dev/null)"; then export GPG_TTY; fi
-  gpg --symmetric --cipher-algo AES256 --output "$ENCRYPT_TMP" "$PORTABLE_TAR" \
-    || die "Secret encryption failed. Your previous backup was preserved, and the originals will now be restored."
+  [ -r /dev/tty ] || die "No interactive terminal is available for the encryption password."
+  IFS= read -r -s -p "Create backup password (typing is hidden): " ENCRYPT_PASSPHRASE < /dev/tty \
+    || die "Could not read the encryption password."
+  printf '\n' > /dev/tty
+  IFS= read -r -s -p "Repeat backup password (typing is hidden): " ENCRYPT_PASSPHRASE_CONFIRM < /dev/tty \
+    || { unset ENCRYPT_PASSPHRASE; die "Could not read the repeated encryption password."; }
+  printf '\n' > /dev/tty
+  if [ -z "$ENCRYPT_PASSPHRASE" ] || [ "$ENCRYPT_PASSPHRASE" != "$ENCRYPT_PASSPHRASE_CONFIRM" ]; then
+    unset ENCRYPT_PASSPHRASE ENCRYPT_PASSPHRASE_CONFIRM
+    die "The passwords were empty or did not match. Your previous backup was preserved."
+  fi
+  unset ENCRYPT_PASSPHRASE_CONFIRM
+  gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+      --symmetric --cipher-algo AES256 --output "$ENCRYPT_TMP" "$PORTABLE_TAR" \
+      3<<<"$ENCRYPT_PASSPHRASE" \
+    || { unset ENCRYPT_PASSPHRASE; die "Secret encryption failed. Your previous backup was preserved, and the originals will now be restored."; }
+  unset ENCRYPT_PASSPHRASE
   [ -s "$ENCRYPT_TMP" ] || die "Secret encryption produced an empty file."
   mv -f "$ENCRYPT_TMP" "$SECRETS_OUT" \
     || die "Could not save the encrypted credentials file. Your previous backup was preserved."

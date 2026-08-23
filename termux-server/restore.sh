@@ -49,6 +49,26 @@ if proot-distro login "$DISTRO" -- true >/dev/null 2>&1; then
   die  "Refusing to overwrite an existing container."
 fi
 
+# Verify the password before installing a 1.5 GB container. Reading it directly
+# from /dev/tty and passing it over a private file descriptor avoids Termux
+# pinentry/gpg-agent timeouts while keeping it hidden and out of shell history.
+SECRETS_PASSPHRASE=""
+if [ -n "$SECRETS_BUNDLE" ]; then
+  say "Checking the encrypted credentials password"
+  [ -r /dev/tty ] || die "No interactive terminal is available for the backup password."
+  IFS= read -r -s -p "Backup password (typing is hidden): " SECRETS_PASSPHRASE < /dev/tty \
+    || die "Could not read the backup password."
+  printf '\n' > /dev/tty
+  [ -n "$SECRETS_PASSPHRASE" ] || die "The backup password cannot be empty."
+  if ! gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+      --output /dev/null --decrypt "$SECRETS_BUNDLE" \
+      3<<<"$SECRETS_PASSPHRASE"; then
+    unset SECRETS_PASSPHRASE
+    die "Wrong password or damaged credentials file. Nothing was installed."
+  fi
+  ok "encrypted credentials password accepted"
+fi
+
 say "Restoring $DISTRO from $(du -h "$TARBALL" | cut -f1) snapshot"
 proot-distro restore "$TARBALL" || die "proot-distro restore failed."
 
@@ -91,10 +111,13 @@ if [ -n "$SECRETS_BUNDLE" ]; then
   trap 'exit 130' INT
   trap 'exit 143' TERM
 
-  if [ -z "${GPG_TTY:-}" ] && GPG_TTY="$(tty 2>/dev/null)"; then export GPG_TTY; fi
-  if ! gpg --output "$SECRETS_ARCHIVE" --decrypt "$SECRETS_BUNDLE"; then
-    die "Wrong password or damaged credentials file. The container is installed, but its secrets were not changed."
+  if ! gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+      --output "$SECRETS_ARCHIVE" --decrypt "$SECRETS_BUNDLE" \
+      3<<<"$SECRETS_PASSPHRASE"; then
+    unset SECRETS_PASSPHRASE
+    die "The pre-checked credentials could not be decrypted again. The container is installed, but its secrets were not changed."
   fi
+  unset SECRETS_PASSPHRASE
 
   SECRET_MEMBERS="$(tar -tf "$SECRETS_ARCHIVE" 2>/dev/null)" \
     || die "The decrypted credentials file is not a valid archive."
