@@ -7,24 +7,37 @@
 #
 # THIS RUNS IN TERMUX (proot-distro is a Termux command):
 #
-#   ./restore.sh ~/examzen-ubuntu-20260823.tar.gz
+#   ./restore.sh ~/examzen-ubuntu-20260823.tar.gz \
+#     ~/examzen-ubuntu-20260823.secrets.tar.gpg
 #
-# The snapshot deliberately carries NO secrets, so this finishes by telling you
-# exactly which two files to supply before the server will work.
+# The snapshot deliberately carries NO secrets. When its encrypted credentials
+# companion is supplied, this script restores both required files and fixes all
+# directory/file permissions automatically.
 # ═══════════════════════════════════════════════════════════════════════════
 set -uo pipefail
 
 DISTRO="${DISTRO:-ubuntu}"
 TARBALL="${1:-}"
+SECRETS_BUNDLE="${2:-}"
 
 say()  { printf '\n\033[1;36m▶ %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m  ✔ %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m  ⚠ %s\033[0m\n' "$*"; }
 die()  { printf '\033[1;31m✖ %s\033[0m\n' "$*" >&2; exit 1; }
+usage() { printf 'Usage: %s <snapshot.tar.gz> [encrypted-secrets.tar.gpg]\n' "${0##*/}"; }
+
+if [ "${1:-}" = -h ] || [ "${1:-}" = --help ]; then usage; exit 0; fi
+[ "$#" -le 2 ] || die "Too many arguments. Run ${0##*/} --help"
+case "${1:-}" in --*) die "Unknown option: $1. Run ${0##*/} --help" ;; esac
+case "${2:-}" in --*) die "Unknown option: $2. Run ${0##*/} --help" ;; esac
 
 [ -n "${TERMUX_VERSION:-}" ] || die "Run this in Termux, not inside a container."
-[ -n "$TARBALL" ] || die "Usage: ./restore.sh <snapshot.tar.gz>"
+[ -n "$TARBALL" ] || { usage >&2; exit 1; }
 [ -f "$TARBALL" ] || die "No such file: $TARBALL"
+if [ -n "$SECRETS_BUNDLE" ]; then
+  [ -f "$SECRETS_BUNDLE" ] || die "No such encrypted secrets file: $SECRETS_BUNDLE"
+  command -v gpg >/dev/null || die "gpg is required to restore encrypted secrets. Run: pkg install -y gnupg"
+fi
 command -v proot-distro >/dev/null || die "proot-distro not found. Run: pkg install -y proot-distro"
 
 # Restoring over a live container would either be refused or silently blend two
@@ -62,25 +75,92 @@ proot-distro login "$DISTRO" -- bash -lc '
   exit $fail
 ' || die "The restored container is incomplete. Re-download the snapshot, or run install.sh instead."
 
+# If the encrypted companion file was supplied, restore both secret files now
+# and apply their restrictive permissions automatically. The operator should not
+# need to understand chmod or remember a second cleanup step: one restore command
+# should produce a server that is ready to start.
+if [ -n "$SECRETS_BUNDLE" ]; then
+  say "Decrypting and validating credentials"
+  SECRETS_TMP_DIR="$(mktemp -d "${TMPDIR:-$HOME}/examzen-secrets.XXXXXX")" \
+    || die "Could not create a temporary directory for credentials."
+  chmod 700 "$SECRETS_TMP_DIR"
+  SECRETS_ARCHIVE="$SECRETS_TMP_DIR/secrets.tar"
+  STAGE="$SECRETS_TMP_DIR/stage"
+  cleanup_secrets_tmp() { rm -rf "$SECRETS_TMP_DIR"; }
+  trap cleanup_secrets_tmp EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  if [ -z "${GPG_TTY:-}" ] && GPG_TTY="$(tty 2>/dev/null)"; then export GPG_TTY; fi
+  if ! gpg --output "$SECRETS_ARCHIVE" --decrypt "$SECRETS_BUNDLE"; then
+    die "Wrong password or damaged credentials file. The container is installed, but its secrets were not changed."
+  fi
+
+  SECRET_MEMBERS="$(tar -tf "$SECRETS_ARCHIVE" 2>/dev/null)" \
+    || die "The decrypted credentials file is not a valid archive."
+  [ "$(printf '%s\n' "$SECRET_MEMBERS" | grep -cx 'opt/examzen/termux-server/server.env')" -eq 1 ] \
+    || die "Credentials archive must contain exactly one server.env. Nothing was extracted."
+  [ "$(printf '%s\n' "$SECRET_MEMBERS" | grep -cx 'opt/examzen-secrets/firebase-service-account.json')" -eq 1 ] \
+    || die "Credentials archive must contain exactly one firebase-service-account.json. Nothing was extracted."
+  UNEXPECTED="$(printf '%s\n' "$SECRET_MEMBERS" | grep -Ev '^(opt/examzen/termux-server/server\.env|opt/examzen-secrets/?|opt/examzen-secrets/firebase-service-account\.json)$')"
+  [ -z "$UNEXPECTED" ] \
+    || die "Credentials archive contains unexpected paths. Nothing was extracted."
+
+  # Read only the two approved members as bytes into private staging files.
+  # Never extract the supplied archive at container root: this prevents links,
+  # duplicate entries, or unrelated members from overwriting container files.
+  mkdir -p "$STAGE/opt/examzen/termux-server" "$STAGE/opt/examzen-secrets"
+  tar -xOf "$SECRETS_ARCHIVE" 'opt/examzen/termux-server/server.env' \
+    > "$STAGE/opt/examzen/termux-server/server.env" \
+    || die "Could not read server.env from the credentials archive."
+  tar -xOf "$SECRETS_ARCHIVE" 'opt/examzen-secrets/firebase-service-account.json' \
+    > "$STAGE/opt/examzen-secrets/firebase-service-account.json" \
+    || die "Could not read the Firebase JSON from the credentials archive."
+  [ -s "$STAGE/opt/examzen/termux-server/server.env" ] \
+    || die "server.env is empty. Nothing was extracted."
+  [ -s "$STAGE/opt/examzen-secrets/firebase-service-account.json" ] \
+    || die "firebase-service-account.json is empty. Nothing was extracted."
+  chmod 600 "$STAGE/opt/examzen/termux-server/server.env" \
+    "$STAGE/opt/examzen-secrets/firebase-service-account.json"
+
+  say "Restoring credentials and securing permissions"
+  tar -C "$STAGE" -cf - \
+      opt/examzen/termux-server/server.env \
+      opt/examzen-secrets/firebase-service-account.json \
+    | proot-distro login "$DISTRO" -- tar -C / -xf - \
+    || die "The validated credentials could not be restored completely."
+  proot-distro login "$DISTRO" -- bash -lc '
+    set -e
+    test -f /opt/examzen/termux-server/server.env
+    test ! -L /opt/examzen/termux-server/server.env
+    test -s /opt/examzen/termux-server/server.env
+    test -f /opt/examzen-secrets/firebase-service-account.json
+    test ! -L /opt/examzen-secrets/firebase-service-account.json
+    test -s /opt/examzen-secrets/firebase-service-account.json
+    chmod 700 /opt/examzen-secrets
+    chmod 600 /opt/examzen/termux-server/server.env
+    chmod 600 /opt/examzen-secrets/firebase-service-account.json
+  ' || die "Credentials were extracted, but validation or permission setup failed."
+  cleanup_secrets_tmp
+  trap - EXIT INT TERM
+  ok "credentials restored and permissions secured automatically"
+fi
+
+if [ -n "$SECRETS_BUNDLE" ]; then
+  SECRET_RESULT="Credentials are restored too — no editing and no chmod required."
+else
+  SECRET_RESULT="No encrypted secrets file was supplied; add server.env and the Firebase JSON before starting."
+fi
+
 cat <<EOF
 
 $(printf '\033[1;32m✔ Restored.\033[0m')  No build required.
 
-$(printf '\033[1;33mTWO FILES ARE MISSING ON PURPOSE\033[0m') — the snapshot carries no secrets:
-
-  1. Firebase service account
-       proot-distro login $DISTRO
-       mkdir -p /opt/examzen-secrets && chmod 700 /opt/examzen-secrets
-       nano /opt/examzen-secrets/firebase-service-account.json
-
-  2. server.env (bot token, and optionally Backblaze + Supabase)
-       cd /opt/examzen/termux-server
-       cp server.env.example server.env
-       nano server.env
+$SECRET_RESULT
 
 Then start it:
 
-       termux-wake-lock          # run this one in Termux
+       termux-wake-lock
        proot-distro login $DISTRO
        cd /opt/examzen/termux-server && ./start-all.sh
 

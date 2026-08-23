@@ -15,7 +15,10 @@
 #
 #   proot-distro login ubuntu -- cat /opt/examzen/termux-server/backup.sh > ~/examzen-backup.sh
 #   chmod +x ~/examzen-backup.sh
-#   ~/examzen-backup.sh
+#   ~/examzen-backup.sh --with-secrets
+#
+# This creates a secret-free dependency snapshot plus a password-encrypted
+# credentials companion. Keep both files together for one-command restore.
 #
 # SECRETS ARE REMOVED BEFORE THE SNAPSHOT AND PUT BACK AFTER.
 # The container holds server.env (bot token, Backblaze secret, Supabase
@@ -28,14 +31,34 @@
 set -uo pipefail
 
 DISTRO="${DISTRO:-ubuntu}"
-OUT="${1:-$HOME/examzen-$DISTRO-$(date +%Y%m%d).tar.gz}"
+WITH_SECRETS=0
+OUT=""
 HOLD="$HOME/.examzen-secret-holdout"
 SECRETS_TAR="$HOLD/secrets.tar"
+ENCRYPT_TMP_DIR=""
 
 say()  { printf '\n\033[1;36m▶ %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m  ✔ %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m  ⚠ %s\033[0m\n' "$*"; }
 die()  { printf '\033[1;31m✖ %s\033[0m\n' "$*" >&2; exit 1; }
+usage() {
+  printf 'Usage: %s [--with-secrets] [snapshot.tar.gz]\n' "${0##*/}"
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --with-secrets) WITH_SECRETS=1 ;;
+    -h|--help) usage; exit 0 ;;
+    --*) die "Unknown option: $1. Run ${0##*/} --help" ;;
+    *)
+      [ -z "$OUT" ] || die "Only one snapshot path is allowed. Run ${0##*/} --help"
+      OUT="$1"
+      ;;
+  esac
+  shift
+done
+OUT="${OUT:-$HOME/examzen-$DISTRO-$(date +%Y%m%d).tar.gz}"
+SECRETS_OUT="${OUT%.tar.gz}.secrets.tar.gpg"
 
 [ -n "${TERMUX_VERSION:-}" ] || die "Run this in Termux, not inside the container (proot-distro is a Termux command)."
 command -v proot-distro >/dev/null || die "proot-distro not found."
@@ -46,6 +69,7 @@ proot-distro login "$DISTRO" -- true >/dev/null 2>&1 \
 # Registered before anything is removed, so Ctrl-C or a failed backup still
 # leaves a working server rather than one missing its credentials.
 restore_secrets() {
+  [ -z "$ENCRYPT_TMP_DIR" ] || rm -rf "$ENCRYPT_TMP_DIR"
   if [ -s "$SECRETS_TAR" ]; then
     if proot-distro login "$DISTRO" -- tar -C / -xf - < "$SECRETS_TAR" 2>/dev/null; then
       ok "secrets restored into the container"
@@ -58,7 +82,9 @@ restore_secrets() {
     fi
   fi
 }
-trap restore_secrets EXIT INT TERM
+trap restore_secrets EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 say "Stopping the server so nothing is captured mid-write"
 proot-distro login "$DISTRO" -- bash -lc \
@@ -79,6 +105,19 @@ if [ -z "$present" ]; then
   rm -f "$SECRETS_TAR"
   warn "No server.env and no /opt/examzen-secrets — nothing to strip."
 else
+  if [ "$WITH_SECRETS" -eq 1 ]; then
+    proot-distro login "$DISTRO" -- bash -lc '
+      test -f /opt/examzen/termux-server/server.env &&
+      test ! -L /opt/examzen/termux-server/server.env &&
+      test -s /opt/examzen/termux-server/server.env &&
+      test -f /opt/examzen-secrets/firebase-service-account.json &&
+      test ! -L /opt/examzen-secrets/firebase-service-account.json &&
+      test -s /opt/examzen-secrets/firebase-service-account.json
+    ' || die "--with-secrets requires two non-empty regular files:
+  /opt/examzen/termux-server/server.env
+  /opt/examzen-secrets/firebase-service-account.json
+Nothing was removed. Add the missing credential and run backup again."
+  fi
   ok "found: $(echo "$present" | tr '\n' ' ')"
   say "Copying them out of the container"
   proot-distro login "$DISTRO" -- bash -lc '
@@ -101,6 +140,12 @@ else
     die "Could not copy the secrets out of the container (the archive is empty).
   NOTHING has been removed — your secrets are untouched and the server still works.
   Snapshot aborted rather than risk destroying credentials that exist nowhere else."
+  fi
+  if [ "$WITH_SECRETS" -eq 1 ]; then
+    tar -tf "$SECRETS_TAR" | grep -qx 'opt/examzen/termux-server/server.env' \
+      || die "The held archive is missing server.env. Nothing was removed."
+    tar -tf "$SECRETS_TAR" | grep -qx 'opt/examzen-secrets/firebase-service-account.json' \
+      || die "The held archive is missing firebase-service-account.json. Nothing was removed."
   fi
   ok "held $held entries safely outside the rootfs"
 
@@ -155,21 +200,73 @@ if tar -tf "$OUT" 2>/dev/null | grep -E 'examzen-secrets|termux-server/server\.e
 fi
 ok "no server.env and no examzen-secrets inside — safe to publish"
 
+# Optionally turn the held-out secret tar into a password-encrypted companion
+# file. The dependency snapshot remains safe to upload publicly; the companion
+# carries the bot token, Firebase JSON, Backblaze key and Supabase service_role
+# JWT, but only in encrypted form. Keeping the two files separate avoids ever
+# writing a plaintext full-container snapshot with credentials inside it.
+if [ "$WITH_SECRETS" -eq 1 ]; then
+  [ -s "$SECRETS_TAR" ] || die "--with-secrets was requested, but no secrets were found to encrypt."
+  command -v gpg >/dev/null 2>&1 || die "gpg is required for --with-secrets. Run in Termux: pkg install -y gnupg"
+  say "Encrypting the credentials companion file"
+  ENCRYPT_TMP_DIR="$(mktemp -d "$(dirname "$SECRETS_OUT")/.examzen-encrypt.XXXXXX")" \
+    || die "Could not create a temporary encryption directory."
+  chmod 700 "$ENCRYPT_TMP_DIR"
+  ENCRYPT_TMP="$ENCRYPT_TMP_DIR/secrets.tar.gpg"
+  PORTABLE_STAGE="$ENCRYPT_TMP_DIR/stage"
+  PORTABLE_TAR="$ENCRYPT_TMP_DIR/secrets.tar"
+  mkdir -p "$PORTABLE_STAGE/opt/examzen/termux-server" "$PORTABLE_STAGE/opt/examzen-secrets"
+  tar -xOf "$SECRETS_TAR" 'opt/examzen/termux-server/server.env' \
+    > "$PORTABLE_STAGE/opt/examzen/termux-server/server.env" \
+    || die "Could not stage server.env for encryption."
+  tar -xOf "$SECRETS_TAR" 'opt/examzen-secrets/firebase-service-account.json' \
+    > "$PORTABLE_STAGE/opt/examzen-secrets/firebase-service-account.json" \
+    || die "Could not stage the Firebase JSON for encryption."
+  [ -s "$PORTABLE_STAGE/opt/examzen/termux-server/server.env" ] \
+    && [ -s "$PORTABLE_STAGE/opt/examzen-secrets/firebase-service-account.json" ] \
+    || die "A staged credential is empty; refusing to create an incomplete backup."
+  chmod 600 "$PORTABLE_STAGE/opt/examzen/termux-server/server.env" \
+    "$PORTABLE_STAGE/opt/examzen-secrets/firebase-service-account.json"
+  tar -C "$PORTABLE_STAGE" -cf "$PORTABLE_TAR" \
+      opt/examzen/termux-server/server.env \
+      opt/examzen-secrets/firebase-service-account.json \
+    || die "Could not create the portable credentials archive."
+  if [ -z "${GPG_TTY:-}" ] && GPG_TTY="$(tty 2>/dev/null)"; then export GPG_TTY; fi
+  gpg --symmetric --cipher-algo AES256 --output "$ENCRYPT_TMP" "$PORTABLE_TAR" \
+    || die "Secret encryption failed. Your previous backup was preserved, and the originals will now be restored."
+  [ -s "$ENCRYPT_TMP" ] || die "Secret encryption produced an empty file."
+  mv -f "$ENCRYPT_TMP" "$SECRETS_OUT" \
+    || die "Could not save the encrypted credentials file. Your previous backup was preserved."
+  rm -rf "$ENCRYPT_TMP_DIR"
+  ENCRYPT_TMP_DIR=""
+  ok "encrypted credentials written: $SECRETS_OUT ($(du -h "$SECRETS_OUT" | cut -f1))"
+fi
+
+if [ "$WITH_SECRETS" -eq 1 ]; then
+  RESTORE_EXAMPLE="./restore.sh /path/to/$(basename "$OUT") /path/to/$(basename "$SECRETS_OUT")"
+  EXTRA_RESULT="Encrypted credentials: $SECRETS_OUT"
+  RESTORE_GUIDANCE="Keep both files together. On a new device, restore the snapshot and credentials
+in one command — permissions are applied automatically:"
+  PRIVACY_GUIDANCE="The dependency snapshot contains no secrets and is safe to publish. Keep the
+encrypted companion private and remember its password."
+else
+  RESTORE_EXAMPLE="./restore.sh /path/to/$(basename "$OUT")"
+  EXTRA_RESULT="No credentials file requested. Use --with-secrets next time to create one."
+  RESTORE_GUIDANCE="On a new device, restore the dependency snapshot with:"
+  PRIVACY_GUIDANCE="The dependency snapshot contains no secrets and is safe to publish. Add the two
+credential files manually before starting the server."
+fi
+
 cat <<EOF
 
 $(printf '\033[1;32m✔ Done.\033[0m')  $OUT  ($SIZE)
+$EXTRA_RESULT
 
-Publish it as a GitHub Release asset (2 GB limit per file, and unlike git it
-does not bloat the repo or keep every old copy forever):
+$RESTORE_GUIDANCE
 
-  gh release create server-snapshot-$(date +%Y%m%d) "$OUT" \\
-    --title "Prebuilt Termux server container" \\
-    --notes "Restore with termux-server/restore.sh. Contains no secrets."
+  pkg install -y proot-distro gnupg
+  $RESTORE_EXAMPLE
 
-On a new device:
-
-  pkg install -y proot-distro
-  # download the tarball, then
-  ./restore.sh /path/to/$(basename "$OUT")
+$PRIVACY_GUIDANCE
 
 EOF
