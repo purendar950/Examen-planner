@@ -299,6 +299,13 @@ async function fcRefreshLive() {
     if (txt) txt.textContent = s.totalFocusing > 0
       ? `${s.totalFocusing} studying across ${s.activeCirclesCount} circles right now`
       : 'No one is studying right now — be the first!';
+    const stats = await D().getMyFocusStats();
+    const el = document.getElementById('fc-my-stats');
+    if (el && stats) {
+      const h = stats.studyHours;
+      const hrs = Number.isInteger(h) ? h : h.toFixed(1);
+      el.textContent = `You: ${hrs} study hours total · ${stats.weeklyFocusMinutes}m this week`;
+    }
   } catch(e) {}
 }
 

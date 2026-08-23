@@ -53,4 +53,17 @@ match /messages/{messageId} {
 }
 ```
 
+Add this top-level (or nested under your existing user/root) rule so the per-user stat can be written and read:
+
+```js
+match /focusStats/{userId} {
+  allow read: if request.auth != null && request.auth.uid == userId;
+  allow write: if request.auth != null
+    && request.auth.uid == userId
+    && request.resource.data.weekKey is string
+    && request.resource.data.totalFocusMinutes is int
+    && request.resource.data.weeklyFocusMinutes is int;
+}
+```
+
 No new composite index is required for join requests. Keep the existing `visibility + createdAt` index for public discovery.

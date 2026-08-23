@@ -11,7 +11,7 @@ console.log('\nFocus Circle contracts');
 // Data layer loads and exposes expected API
 const dataSrc = readFileSync(join(root, 'js/data/study-circles.js'), 'utf8');
 ok('data layer is an IIFE that sets window.FocusCircleData', dataSrc.includes('window.FocusCircleData'));
-for (const fn of ['createCircle','joinByCode','joinPublic','leaveCircle','setVisibility','renameCircle','togglePin','removeMember','getMyCircles','listPublicCircles','getCircleDetail','setPresence','recordFocusMinutes','getLiveSummary','requestToJoin','approveJoinRequest','rejectJoinRequest','watchJoinRequest','subscribeMessages','sendMessage','creationEligibility']) {
+for (const fn of ['createCircle','joinByCode','joinPublic','leaveCircle','setVisibility','renameCircle','togglePin','removeMember','getMyCircles','listPublicCircles','getCircleDetail','setPresence','recordFocusMinutes','getLiveSummary','recordUserFocusMinutes','getMyFocusStats','requestToJoin','approveJoinRequest','rejectJoinRequest','watchJoinRequest','subscribeMessages','sendMessage','creationEligibility']) {
   ok(`exports ${fn}`, dataSrc.includes(fn));
 }
 ok('join code is 6 chars from safe alphabet', /const chars = '[A-HJ-NP-Z2-9]{28}'/.test(dataSrc.replace(/\s+/g,'')) || dataSrc.includes("'ABCDEFGHJKMNPQRSTUVWXYZ23456789'"));
@@ -29,7 +29,7 @@ const pageSrc = readFileSync(join(root, 'pages/study-circle.html'), 'utf8');
 ok('page container id=page-study-circle', pageSrc.includes('id="page-study-circle"'));
 ok('nav entry id=nav-study-circle exists in app.html', readFileSync(join(root,'app.html'),'utf8').includes('nav-study-circle'));
 ok('page include present in app.html', readFileSync(join(root,'app.html'),'utf8').includes('pages/study-circle.html'));
-for (const id of ['fc-live-text','fc-my-list','fc-discover-list','fc-panel-join','fc-create-overlay','fc-detail-overlay','fc-new-approval','fc-room-overlay','fc-room-messages','fc-room-input']) {
+for (const id of ['fc-live-text','fc-my-list','fc-discover-list','fc-panel-join','fc-create-overlay','fc-detail-overlay','fc-new-approval','fc-room-overlay','fc-room-messages','fc-room-input','fc-my-stats']) {
   ok(`UI element #${id} exists`, pageSrc.includes(`id="${id}"`));
 }
 
