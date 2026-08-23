@@ -833,7 +833,16 @@ def _study_exists(doc_id):
 
 
 def _base_ydl_opts():
-    extractor_args = {"youtube-ejs": {"jitless": ["true"]}}
+    # fetch_pot=always forces a GVS PO token even for clients yt-dlp classifies
+    # as not needing one. android_vr is such a client, but YouTube now serves it
+    # only a small unauthenticated preview: measured against a live phone tunnel,
+    # itag 18 returned 206 for bytes 0-2097151 and 403 for every window beyond,
+    # which is indistinguishable from an expired URL until you inspect the
+    # boundary. A PO token from the bgutil provider lifts that window.
+    extractor_args = {
+        "youtube-ejs": {"jitless": ["true"]},
+        "youtube": {"fetch_pot": ["always"]},
+    }
     opts = {
         "quiet": True,
         "no_warnings": True,
