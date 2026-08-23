@@ -47,12 +47,29 @@ say "Taking a wake lock so Android does not freeze the server"
 # and every request times out until you reopen Termux.
 termux-wake-lock || warn "termux-wake-lock failed. Install the Termux:API app, or the server will sleep with the screen."
 
-if proot-distro list --installed 2>/dev/null | grep -q "^${DISTRO}\b" \
-   || [ -d "$PREFIX/var/lib/proot-distro/installed-rootfs/$DISTRO" ]; then
-  say "Container '$DISTRO' already installed — reusing it"
+# Detect an existing container by TRYING TO USE IT, rather than by parsing
+# `proot-distro list --installed` or guessing the rootfs path. Both of those
+# are version-dependent and silently wrong: 5.8.0 (notably the pip-installed
+# build) prints an indented block rather than a bare distro name per line, so a
+# "^ubuntu" match finds nothing, and it can relocate installed-rootfs. The
+# script then tried to install over a container that already existed, which
+# aborts with "container 'ubuntu' already exists" and — under `set -e` — killed
+# the run before the DNS fix and the clone. A login probe cannot drift like
+# that, because it tests the one property we actually depend on.
+say "Checking for an existing $DISTRO container"
+if proot-distro login "$DISTRO" -- true >/dev/null 2>&1; then
+  say "Container '$DISTRO' already present and usable — reusing it"
 else
   say "Installing the $DISTRO container (this downloads a few hundred MB)"
-  proot-distro install "$DISTRO"
+  # Do not let a non-zero exit here end the run: the most common cause is a
+  # container that exists but was not loginable a moment ago. The probe below
+  # is the real verdict.
+  proot-distro install "$DISTRO" || \
+    warn "proot-distro install reported an error — re-testing whether the container is usable anyway."
+  proot-distro login "$DISTRO" -- true >/dev/null 2>&1 || die \
+"Cannot start the $DISTRO container.
+  To rebuild it from scratch (this deletes its contents):  proot-distro reset $DISTRO
+  To inspect what is installed:                            proot-distro list"
 fi
 
 # proot containers frequently ship an empty resolv.conf, which makes every
