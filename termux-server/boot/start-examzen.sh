@@ -6,9 +6,15 @@
 #   1. Install the Termux:Boot app from F-Droid and OPEN IT ONCE. Android will
 #      not grant a boot-receiver to an app that has never been launched, so
 #      skipping this step silently disables autostart.
-#   2. Copy this file into place and make it executable:
+#   2. Copy this file into place and make it executable. Run this in TERMUX, not
+#      inside the container: the source is in the container and the destination
+#      is in Termux, so `cp` cannot see both. Piping it out through
+#      `proot-distro login` also avoids hardcoding the rootfs location, which
+#      moves between proot-distro versions and install methods (the pip-installed
+#      build does not use $PREFIX/var/lib/proot-distro/installed-rootfs).
+#
 #        mkdir -p ~/.termux/boot
-#        cp /path/to/start-examzen.sh ~/.termux/boot/start-examzen
+#        proot-distro login ubuntu -- cat /opt/examzen/termux-server/boot/start-examzen.sh > ~/.termux/boot/start-examzen
 #        chmod +x ~/.termux/boot/start-examzen
 #
 # Termux:Boot runs scripts in ~/.termux/boot alphabetically, in Termux itself,

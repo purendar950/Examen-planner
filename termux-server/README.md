@@ -197,10 +197,17 @@ copy of the resolution logic.
 3. Autostart after reboot — install **Termux:Boot** from F-Droid and *open it
    once* (Android will not grant a boot receiver to an app never launched):
 
+Run these in **Termux**, not inside the container. The source file lives inside
+the container and the destination lives in Termux, so neither a plain `cp` nor a
+host rootfs path works — piping the file out through `proot-distro login` avoids
+needing to know where the rootfs is stored, which differs between proot-distro
+versions and installation methods:
+
 ```sh
 mkdir -p ~/.termux/boot
-cp /opt/examzen/termux-server/boot/start-examzen.sh ~/.termux/boot/start-examzen
+proot-distro login ubuntu -- cat /opt/examzen/termux-server/boot/start-examzen.sh > ~/.termux/boot/start-examzen
 chmod +x ~/.termux/boot/start-examzen
+head -3 ~/.termux/boot/start-examzen     # confirm it landed
 ```
 
 The supervisor restarts a crashed service with exponential backoff (2s → 60s
