@@ -220,6 +220,76 @@ groups on shutdown so nothing is orphaned holding a port.
 tier idling out after ~15 minutes. Once you are off Render, disable it —
 otherwise it pings a dead host every 10 minutes and fails the workflow.
 
+## Install once, run anywhere: container snapshots
+
+`install.sh` takes 10–25 minutes. You only need to pay that once — snapshot the
+finished container and restore it on any other Android device in a few minutes.
+
+**Do not try to commit the dependencies to git.** It is ~500–700 MB of binaries
+against GitHub's 100 MB per-file limit, and worse, it cannot work: the venv
+hardcodes its interpreter path in `pyvenv.cfg`, and `grpcio`, `cryptography` and
+`canvas` are compiled for one exact architecture, glibc and Python minor version.
+A checked-in copy breaks the moment any of those move. A container snapshot has
+none of those problems because it captures the interpreter too.
+
+Both scripts run **in Termux**, not inside the container — `proot-distro` cannot
+see itself from within its own rootfs. Copy them out first:
+
+```sh
+proot-distro login ubuntu -- cat /opt/examzen/termux-server/backup.sh > ~/examzen-backup.sh
+chmod +x ~/examzen-backup.sh
+~/examzen-backup.sh
+```
+
+### Secrets are removed before the snapshot and put back after
+
+The container holds `server.env` (bot token, Backblaze secret, Supabase
+`service_role` JWT) and the Firebase service-account JSON. A raw snapshot
+published to a public GitHub Release would leak all of it — worse than a
+screenshot, because it is the real file.
+
+`backup.sh` copies those out to Termux, **verifies the copy actually contains
+members** (a failed `tar` still writes ~10 KB of padding, so a size check would
+pass for an empty archive — and deleting the originals after that would destroy
+credentials that exist nowhere else), removes them, confirms their absence
+*before* snapshotting, and restores them from an `EXIT` trap so an interruption
+cannot leave the server stripped. If the copy-out fails it aborts without
+removing anything. If the finished tarball somehow lists a secret path it deletes
+the tarball rather than leave it to be uploaded later from shell history.
+
+### Publish it
+
+GitHub Releases allow 2 GB per file and, unlike git, do not bloat the repo or
+retain every old copy:
+
+```sh
+gh release create server-snapshot-20260823 ~/examzen-ubuntu-20260823.tar.gz \
+  --title "Prebuilt Termux server container" \
+  --notes "Restore with termux-server/restore.sh. Contains no secrets."
+```
+
+### On a new device
+
+```sh
+pkg install -y proot-distro
+# download the tarball, then:
+./restore.sh ~/examzen-ubuntu-20260823.tar.gz
+```
+
+`restore.sh` refuses to overwrite an existing container, then verifies the
+expensive artefacts survived — venv, gunicorn, the compiled PO-token server, both
+`node_modules` trees, and a live `import grpc, firebase_admin, yt_dlp` — so a
+truncated download fails immediately instead of surfacing later as a confusing
+runtime error. It finishes by naming the two secret files you must supply.
+
+### Non-Android devices
+
+`.github/workflows/turbo-proxy-image.yml` already builds a Docker image to
+`ghcr.io/purendar950/examen-planner-youtube-turbo-proxy:latest`. It is amd64-only
+today, and Docker cannot run under Termux at all, but it is the better route for a
+Raspberry Pi, mini PC or ARM VPS — add `platforms: linux/amd64,linux/arm64` to
+that workflow first.
+
 ## What stays in the cloud
 
 Self-hosting the compute does not move your data. These remain external and
