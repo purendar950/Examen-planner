@@ -15628,12 +15628,11 @@ def api_stream():
 
     # Replay only yt-dlp's allowlisted request identity for this exact format.
     # Never copy browser Authorization/Cookie/Origin headers to googlevideo.
-    # The browser's seek Range is the sole client header and always wins.
+    # Browser seek ranges win; the initial native-video request may omit Range,
+    # so start it at byte zero rather than let googlevideo reject it with 403.
     direct = stream_format["url"]
     fwd_headers = _safe_stream_request_headers(stream_format.get("http_headers"))
-    rng = request.headers.get("Range")
-    if rng:
-        fwd_headers["Range"] = rng
+    fwd_headers["Range"] = request.headers.get("Range") or "bytes=0-"
 
     upstream = requests.get(direct, headers=fwd_headers, stream=True, timeout=REQUEST_TIMEOUT)
 
