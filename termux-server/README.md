@@ -233,13 +233,21 @@ A checked-in copy breaks the moment any of those move. A container snapshot has
 none of those problems because it captures the interpreter too.
 
 Both scripts run **in Termux**, not inside the container — `proot-distro` cannot
-see itself from within its own rootfs. Copy them out first:
+see itself from within its own rootfs. Create both backup files with:
 
 ```sh
+pkg install -y gnupg
 proot-distro login ubuntu -- cat /opt/examzen/termux-server/backup.sh > ~/examzen-backup.sh
 chmod +x ~/examzen-backup.sh
-~/examzen-backup.sh
+~/examzen-backup.sh --with-secrets
 ```
+
+GPG asks you to create a password. Do not forget it: the password cannot be
+recovered. The command creates two files in the Termux home directory:
+
+- `examzen-ubuntu-YYYYMMDD.tar.gz` — prebuilt dependencies, with no secrets.
+- `examzen-ubuntu-YYYYMMDD.secrets.tar.gpg` — password-encrypted `server.env`
+  and Firebase service-account JSON.
 
 ### Secrets are removed before the snapshot and put back after
 
@@ -257,30 +265,41 @@ cannot leave the server stripped. If the copy-out fails it aborts without
 removing anything. If the finished tarball somehow lists a secret path it deletes
 the tarball rather than leave it to be uploaded later from shell history.
 
-### Publish it
+### Upload to Google Drive
 
-GitHub Releases allow 2 GB per file and, unlike git, do not bloat the repo or
-retain every old copy:
-
-```sh
-gh release create server-snapshot-20260823 ~/examzen-ubuntu-20260823.tar.gz \
-  --title "Prebuilt Termux server container" \
-  --notes "Restore with termux-server/restore.sh. Contains no secrets."
-```
-
-### On a new device
+Run `termux-setup-storage` once, then copy both generated files to Android's
+Downloads folder and upload them with the Google Drive app:
 
 ```sh
-pkg install -y proot-distro
-# download the tarball, then:
-./restore.sh ~/examzen-ubuntu-20260823.tar.gz
+termux-setup-storage
+cp ~/examzen-ubuntu-*.tar.gz ~/storage/downloads/
+cp ~/examzen-ubuntu-*.secrets.tar.gpg ~/storage/downloads/
 ```
 
-`restore.sh` refuses to overwrite an existing container, then verifies the
-expensive artefacts survived — venv, gunicorn, the compiled PO-token server, both
-`node_modules` trees, and a live `import grpc, firebase_admin, yt_dlp` — so a
-truncated download fails immediately instead of surfacing later as a confusing
-runtime error. It finishes by naming the two secret files you must supply.
+Keep the encrypted `.secrets.tar.gpg` file in a private Drive folder. The large
+`.tar.gz` dependency snapshot contains no credentials and is safe to store or
+share separately.
+
+### On a new Android device
+
+Download both Drive files to the phone's Downloads folder, open Termux, and run:
+
+```sh
+pkg install -y proot-distro gnupg curl
+termux-setup-storage
+curl -fsSL https://raw.githubusercontent.com/purendar950/Examen-planner/main/termux-server/restore.sh -o ~/restore.sh
+chmod +x ~/restore.sh
+~/restore.sh \
+  ~/storage/downloads/examzen-ubuntu-YYYYMMDD.tar.gz \
+  ~/storage/downloads/examzen-ubuntu-YYYYMMDD.secrets.tar.gpg
+```
+
+Enter the GPG password created during backup. `restore.sh` refuses to overwrite
+an existing container, verifies that the prebuilt venv, gunicorn, PO-token
+server, Node dependencies, and Python imports survived, restores both secret
+files, and automatically applies directory mode `700` and file mode `600`.
+No dependency reinstall, manual secret editing, or separate `chmod` step is
+required.
 
 ### Non-Android devices
 
