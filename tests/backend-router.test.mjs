@@ -291,12 +291,21 @@ await test('stateful AI creation and every follow-up retain server affinity', as
   assert.match(chatSource, /\/media'[\s\S]*?backendServerId: backendServerId/);
 });
 
-await test('Turbo stream URL stays on the server that returned info', async () => {
-  const start = turboSource.indexOf("var infoPath = '/api/info");
+await test('Turbo pins info and stream to its own server, not the shared registry', async () => {
+  const start = turboSource.indexOf('var infoUrl = TURBO_BACKEND_URL');
+  assert.ok(start > 0, 'expected Turbo to build /api/info from TURBO_BACKEND_URL');
   const end = turboSource.indexOf("candidate.addEventListener('loadedmetadata'", start);
   const handoff = turboSource.slice(start, end);
-  assert.match(handoff, /serverForResponse\(r\)/);
-  assert.match(handoff, /var streamBase = res\.owner\.url/);
+  // Both calls must leave from the SAME pinned host: a googlevideo format URL is
+  // IP-locked to whichever server extracted it, so /api/stream has to be served
+  // by the instance that answered /api/info.
+  assert.match(handoff, /TURBO_BACKEND_URL \+ '\/api\/info\?id='/);
+  assert.match(handoff, /TURBO_BACKEND_URL \+ '\/api\/stream\?id='/);
+  // The shared media registry is Firestore-backed and can carry a phone tunnel
+  // entry (termux-server/quick-tunnel.py upserts one), which would silently
+  // become Turbo's media server. Turbo must not resolve its server through it.
+  assert.doesNotMatch(handoff, /PrepPathBackend/);
+  assert.doesNotMatch(handoff, /serverForResponse/);
   assert.doesNotMatch(handoff, /baseUrl\('media'\)/);
 });
 

@@ -22,8 +22,24 @@
 (function () {
   'use strict';
 
-  /* Your deployed Render backend. Override at runtime with:
-     localStorage.setItem('turboBackendUrl', 'https://your-service.onrender.com') */
+  /* The Render backend that serves Turbo, and the ONLY server Turbo talks to.
+     Override at runtime with:
+       localStorage.setItem('turboBackendUrl', 'https://your-service.onrender.com')
+
+     Turbo deliberately does NOT resolve its server through PrepPathBackend
+     (js/core/backend-router.js). That registry lives in Firestore config/turbo
+     and is shared with the AI/transcript routes, so anything published into it
+     — in particular the `termux-quick-tunnel` entry that termux-server/
+     quick-tunnel.py upserts for a phone-hosted server — silently became Turbo's
+     media server too. When that phone was asleep, offline, or its Cloudflare
+     Quick Tunnel had rotated, Turbo took the whole registry's failure with it:
+     the byte stream is opened by the browser as <video src>, so a wrong or dead
+     host surfaces only as an opaque media error.
+
+     Pinning here keeps playback on the Render service that render-keepalive.yml
+     keeps warm, and makes /api/info and /api/stream provably hit the SAME host
+     (googlevideo format URLs are IP-locked to whichever server extracted them,
+     which is why the old code had to ask the router for response affinity). */
   var configuredTurboBackendUrl = localStorage.getItem('turboBackendUrl') || '';
   if (/^https:\/\/youtube-turbo-proxy(?:-gej4)?\.onrender\.com\/?$/i.test(configuredTurboBackendUrl)) {
     configuredTurboBackendUrl = 'https://youtube-turbo-proxy-new.onrender.com';
@@ -482,13 +498,13 @@
     emitTurboState();
     var timer = setTimeout(function () { if (seq === turboLoadSeq) ctrl.abort(); }, 95000);
 
-    var infoPath = '/api/info?id=' + encodeURIComponent(id);
-    (window.PrepPathBackend && typeof window.PrepPathBackend.fetch === 'function'
-      ? window.PrepPathBackend.fetch(infoPath, { signal: ctrl.signal, timeoutMs: 95000 })
-      : Promise.reject(new Error('Backend routing is unavailable. Reload the app.')))
+    /* Straight at the pinned Turbo server. The 95s budget is already enforced
+       by the abort timer above, so no router timeout is needed, and /api/info
+       takes no auth (see youtube-turbo-proxy/app.py). */
+    var infoUrl = TURBO_BACKEND_URL + '/api/info?id=' + encodeURIComponent(id);
+    fetch(infoUrl, { signal: ctrl.signal })
       .then(function (r) {
-        var owner = window.PrepPathBackend.serverForResponse(r);
-        return r.json().then(function (d) { return { ok: r.ok, d: d, owner: owner }; });
+        return r.json().then(function (d) { return { ok: r.ok, d: d }; });
       })
       .then(function (res) {
         clearTimeout(timer);
@@ -499,9 +515,9 @@
         turboVidTitle = (res.d && res.d.title) || turboVidTitle;
         var f = res.d.formats[0];              // highest single-file quality
         var current = (typeof ytSpeedCurrent !== 'undefined') ? ytSpeedCurrent : 1;
-        if (!res.owner || !res.owner.url) throw new Error('Turbo server affinity is unavailable. Reload the app.');
-        var streamBase = res.owner.url;
-        var streamUrl = streamBase + '/api/stream?id=' + encodeURIComponent(id) + '&itag=' + encodeURIComponent(f.itag);
+        // Same pinned host that just answered /api/info, so the extraction and
+        // the byte stream always share one server (and one IP).
+        var streamUrl = TURBO_BACKEND_URL + '/api/stream?id=' + encodeURIComponent(id) + '&itag=' + encodeURIComponent(f.itag);
         // Each asynchronous load owns a fresh media element. Event closures now
         // carry immutable seq/id/source identity, so an old queued media event
         // cannot observe mutable state from—and corrupt—a newer request.
@@ -703,19 +719,12 @@
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify({ imageBase64: base64, caption: caption })
       };
-      if (!window.PrepPathBackend || typeof window.PrepPathBackend.fetch !== 'function' ||
-          typeof window.PrepPathBackend.syncPolicy !== 'function') {
-        throw new Error('Backend routing is unavailable. Reload the app.');
-      }
-      return window.PrepPathBackend.syncPolicy().then(function (config) {
-        var strictBackend = !!(config && config.mode === 'strict');
-        // A per-device relay override is allowed in auto/manual mode only. Strict
-        // mode guarantees this upload uses the one Admin-selected backend too.
-        var hasCustomRelay = !strictBackend && !!localStorage.getItem('telegramBotUrl');
-        return strictBackend || !hasCustomRelay
-          ? window.PrepPathBackend.fetch('/send-photo', requestOptions)
-          : fetch(TELEGRAM_BOT_URL + '/send-photo', requestOptions);
-      });
+      // Same pinned server as playback. The screenshot is a Turbo action, so it
+      // must not depend on the shared media registry either — a Turbo session
+      // that plays fine should never fail to send because the registry points
+      // somewhere else. TELEGRAM_BOT_URL defaults to TURBO_BACKEND_URL and
+      // still honours the telegramBotUrl override for a self-hosted relay.
+      return fetch(TELEGRAM_BOT_URL + '/send-photo', requestOptions);
     })
       .then(function (r) { return r.json().catch(function () { return { ok: r.ok }; }); })
       .then(function (res) {
