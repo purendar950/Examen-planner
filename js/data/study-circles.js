@@ -345,15 +345,55 @@ async function recordFocusMinutes(minutes) {
   if (!database || !currentUser) return;
   const wk = _currentWeekKey();
   const ids = (appState && Array.isArray(appState.fcCircleIds)) ? appState.fcCircleIds : [];
-  const batch = database.batch();
-  ids.forEach(cid => {
-    batch.set(
-      database.collection('studyCircles').doc(cid).collection('members').doc(currentUser.uid),
-      { weeklyFocusMinutes: firebase.firestore.FieldValue.increment(minutes), weekKey: wk },
-      { merge: true }
-    );
-  });
-  await batch.commit();
+  for (const cid of ids) {
+    const mref = database.collection('studyCircles').doc(cid).collection('members').doc(currentUser.uid);
+    const mdata = (await mref.get()).data() || {};
+    // Reset the weekly counter when the ISO week rolls over so it stays weekly,
+    // not a forever-growing lifetime number.
+    const update = mdata.weekKey === wk
+      ? { weeklyFocusMinutes: firebase.firestore.FieldValue.increment(minutes), weekKey: wk }
+      : { weeklyFocusMinutes: minutes, weekKey: wk };
+    await mref.set(update, { merge: true });
+  }
+  await recordUserFocusMinutes(minutes);
+}
+
+// Per-user lifetime + weekly focus stat (Safar-style "study hours").
+// Stored at focusStats/{uid}; weeklyFocusMinutes resets on week change.
+async function recordUserFocusMinutes(minutes) {
+  if (!minutes || minutes < 1) return;
+  const database = fcDb();
+  if (!database || !currentUser) return;
+  const wk = _currentWeekKey();
+  const ref = database.collection('focusStats').doc(currentUser.uid);
+  const data = (await ref.get()).data() || {};
+  const update = data.weekKey === wk
+    ? {
+        totalFocusMinutes: firebase.firestore.FieldValue.increment(minutes),
+        weeklyFocusMinutes: firebase.firestore.FieldValue.increment(minutes),
+        weekKey: wk,
+        updatedAt: new Date().toISOString()
+      }
+    : {
+        totalFocusMinutes: (data.totalFocusMinutes || 0) + minutes,
+        weeklyFocusMinutes: minutes,
+        weekKey: wk,
+        updatedAt: new Date().toISOString()
+      };
+  await ref.set(update, { merge: true });
+}
+
+async function getMyFocusStats() {
+  const database = fcDb();
+  if (!database || !currentUser) return null;
+  const data = (await database.collection('focusStats').doc(currentUser.uid).get()).data() || {};
+  const total = data.totalFocusMinutes || 0;
+  return {
+    totalFocusMinutes: total,
+    weeklyFocusMinutes: data.weeklyFocusMinutes || 0,
+    weekKey: data.weekKey || '',
+    studyHours: Math.floor((total / 60) * 10) / 10
+  };
 }
 
 async function getLiveSummary() {
@@ -401,7 +441,7 @@ window.FocusCircleData = {
   getMyCircles, listPublicCircles, getCircleDetail,
   requestToJoin, approveJoinRequest, rejectJoinRequest,
   getJoinRequests, watchJoinRequest, subscribeMessages, sendMessage,
-  setPresence, recordFocusMinutes, getLiveSummary,
+  setPresence, recordFocusMinutes, recordUserFocusMinutes, getMyFocusStats, getLiveSummary,
   creationEligibility, generateJoinCode, REQUIRED_STREAK
 };
 })();
