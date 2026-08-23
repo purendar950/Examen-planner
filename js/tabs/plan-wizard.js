@@ -775,6 +775,100 @@ function pwSetMockDuration(val) {
   PW_STATE.mock.durationDays = Math.max(1, parseInt(val) || 30);
 }
 
+/* ── Safar-style plan preview ──
+   Builds the exact cfg that Generate will save, then dry-runs buildPlanSchedule()
+   so users see real calendar fit, workload, and warnings before committing. */
+function pwBuildSyllabusConfig() {
+  const cfg = { planType: PW_STATE.type };
+  cfg.startDate  = PW_STATE.syllabus.startDate;
+  cfg.endDate    = PW_STATE.syllabus.endDate;
+  cfg.dailyHours = PW_STATE.syllabus.dailyHours;
+  cfg.order      = PW_STATE.syllabus.order || 'sequential';
+  cfg.chapters   = JSON.parse(JSON.stringify(PW_STATE.syllabus.chapters || {}));
+  cfg.subjectFreq = JSON.parse(JSON.stringify(PW_STATE.syllabus.subjectFreq || {}));
+  cfg.subjectHours = JSON.parse(JSON.stringify(PW_STATE.syllabus.subjectHours || {}));
+  /* Effort budget: 2 points ≈ one medium topic ≈ roughly one hour. */
+  cfg.dailyTopicPoints = Math.max(2, Math.round((Number(cfg.dailyHours) || 4) * 2));
+  if (PW_STATE.type === 'single') {
+    cfg.scopeSubId = PW_STATE.syllabus.subId;
+    cfg.topicsPerDay = Math.max(1, parseInt(PW_STATE.syllabus.topicsPerDay, 10) || 1);
+  }
+  return cfg;
+}
+
+function pwPreviewSyllabusPlan(cfg) {
+  const schedule = buildPlanSchedule(cfg, 'plan_preview');
+  const days = Object.entries(schedule.byDate)
+    .map(([date, items]) => ({
+      date,
+      points: items.filter(item => item.type === 'study')
+        .reduce((sum, item) => sum + (Number(item.points) || 0), 0),
+      count: items.filter(item => item.type === 'study').length
+    }));
+  const workDays = days.filter(day => day.count > 0);
+  const totalUnits = workDays.reduce((sum, day) => sum + day.count, 0);
+  const totalPoints = workDays.reduce((sum, day) => sum + day.points, 0);
+  const maxLoad = workDays.reduce((max, day) => Math.max(max, day.points), 0);
+  const overloadedDays = days.filter(day => day.points > cfg.dailyTopicPoints).length;
+  const warnings = [];
+  if (!totalUnits) {
+    warnings.push({ tone:'warn', text:'No pending syllabus units to schedule.' });
+  }
+  if (cfg.endDate && schedule.endDate > cfg.endDate) {
+    warnings.push({ tone:'danger', text:`This pace finishes on ${schedule.endDate}, after your target ${cfg.endDate}.` });
+  }
+  if (overloadedDays) {
+    warnings.push({ tone:'warn', text:`${overloadedDays} day${overloadedDays === 1 ? '' : 's'} exceed the ${cfg.dailyTopicPoints}-point daily budget.` });
+  }
+  return {
+    ...schedule,
+    previewDays: days,
+    workDays: workDays.length,
+    totalUnits,
+    totalPoints,
+    averagePoints: totalUnits ? Math.round((totalPoints / workDays.length) * 10) / 10 : 0,
+    maxLoad,
+    dailyBudget: cfg.dailyTopicPoints,
+    overloadedDays,
+    warnings
+  };
+}
+
+function pwRenderPlanPreview(preview) {
+  if (!preview) return '';
+  const warningHtml = preview.warnings.map(w => `
+    <div style="margin-top:6px;padding:.45rem .6rem;border-radius:8px;font-size:.7rem;line-height:1.35;
+      background:${w.tone === 'danger' ? 'rgba(239,68,68,.08)' : 'rgba(245,158,11,.08)'};
+      border:1px solid ${w.tone === 'danger' ? 'rgba(239,68,68,.25)' : 'rgba(245,158,11,.25)'};
+      color:${w.tone === 'danger' ? '#ef4444' : '#f59e0b'};">⚠️ ${escapeHtml(w.text)}</div>`).join('');
+  return `
+    <div style="margin-top:.75rem;padding:.7rem .8rem;background:var(--surface);border:1px solid var(--border);border-radius:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <span style="font-size:.76rem;font-weight:800;color:var(--text);">Live distribution preview</span>
+        <span style="font-size:.65rem;color:var(--muted);">${preview.startDate} → ${preview.endDate}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:.55rem;">
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:.5rem;">
+          <div style="font-size:.58rem;color:var(--muted);">Assigned units</div>
+          <div style="font-size:.85rem;font-weight:800;color:var(--text);">${preview.totalUnits}</div>
+        </div>
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:.5rem;">
+          <div style="font-size:.58rem;color:var(--muted);">Study days</div>
+          <div style="font-size:.85rem;font-weight:800;color:var(--text);">${preview.workDays}</div>
+        </div>
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:.5rem;">
+          <div style="font-size:.58rem;color:var(--muted);">Avg / active day</div>
+          <div style="font-size:.85rem;font-weight:800;color:var(--text);">${preview.averagePoints} pt</div>
+        </div>
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:.5rem;">
+          <div style="font-size:.58rem;color:var(--muted);">Peak / budget</div>
+          <div style="font-size:.85rem;font-weight:800;color:${preview.overloadedDays ? '#f59e0b' : 'var(--text)'};">${preview.maxLoad} / ${preview.dailyBudget}</div>
+        </div>
+      </div>
+      ${warningHtml}
+    </div>`;
+}
+
 /* ── Step 3: Review summary + Generate ── */
 function pwShowStep3Summary() {
   pwPushInputsToState();
@@ -808,6 +902,14 @@ function pwShowStep3Summary() {
         <span>Order</span>
         <span><strong>${orderLabel}</strong></span>
       </div>`;
+    let previewHtml = '';
+    try {
+      const previewCfg = pwBuildSyllabusConfig();
+      previewHtml = pwRenderPlanPreview(pwPreviewSyllabusPlan(previewCfg));
+    } catch(e) { console.warn('Plan preview failed:', e); }
+    const effortLabel = isSingle
+      ? `${Math.max(1, parseInt(PW_STATE.syllabus.topicsPerDay, 10) || 1)} topics/day`
+      : `${PW_STATE.syllabus.dailyHours}h · ${(Math.max(2, Math.round((Number(PW_STATE.syllabus.dailyHours) || 4) * 2)))}pt/day`;
     wrap.innerHTML = `
       <h4>${heading}</h4>
       ${rows}
@@ -816,7 +918,8 @@ function pwShowStep3Summary() {
         <span>Schedule</span>
         <span><strong>${PW_STATE.syllabus.startDate}</strong> → <strong>${PW_STATE.syllabus.endDate}</strong> (${totalDays} days)</span>
       </div>
-      ${isSingle ? '<div class="confirm-row"><span>Topics per day</span><span><strong>' + Math.max(1, parseInt(PW_STATE.syllabus.topicsPerDay, 10) || 1) + '</strong></span></div>' : '<div class="confirm-row"><span>Daily hours</span><span><strong>' + PW_STATE.syllabus.dailyHours + 'h</strong></span></div>'}
+      <div class="confirm-row"><span>Daily effort</span><span><strong>${effortLabel}</strong></span></div>
+      ${previewHtml}
     `;
   } else if (t === 'practice') {
     const p = PW_STATE.practice;
@@ -864,22 +967,10 @@ function pwGenerate() {
   const nameInput = document.getElementById('pw-plan-name');
   PW_STATE.name = (nameInput && nameInput.value || '').trim();
   /* Build the config object consumed by the renderer */
-  const cfg = { planType: PW_STATE.type };
-  if (PW_STATE.type === 'syllabus' || PW_STATE.type === 'single') {
-    cfg.startDate  = PW_STATE.syllabus.startDate;
-    cfg.endDate    = PW_STATE.syllabus.endDate;
-    cfg.dailyHours = PW_STATE.syllabus.dailyHours;
-    /* New chapter-level config */
-    cfg.order    = PW_STATE.syllabus.order || 'sequential';
-    cfg.chapters = JSON.parse(JSON.stringify(PW_STATE.syllabus.chapters || {}));
-    cfg.subjectFreq = JSON.parse(JSON.stringify(PW_STATE.syllabus.subjectFreq || {}));
-    cfg.subjectHours = JSON.parse(JSON.stringify(PW_STATE.syllabus.subjectHours || {}));
-    /* Single Subject mode: scope the whole plan to one subject. */
-    if (PW_STATE.type === 'single') {
-      cfg.scopeSubId = PW_STATE.syllabus.subId;
-      cfg.topicsPerDay = Math.max(1, parseInt(PW_STATE.syllabus.topicsPerDay, 10) || 1);
-    }
-  } else if (PW_STATE.type === 'practice') {
+  const cfg = (PW_STATE.type === 'syllabus' || PW_STATE.type === 'single')
+    ? pwBuildSyllabusConfig()
+    : { planType: PW_STATE.type };
+  if (PW_STATE.type === 'practice') {
     cfg.subjects        = PW_STATE.practice.subjects.slice();
     cfg.practiceType    = PW_STATE.practice.practiceType;
     cfg.dailyTime       = PW_STATE.practice.dailyTime;
@@ -927,6 +1018,8 @@ function pwGenerate() {
       existing.name = finalName;
       existing.updatedAt = new Date().toISOString();
       existing.cfg = JSON.parse(JSON.stringify(cfg));
+      existing.plannerVersion = 2;
+      existing.weightedPlanning = true;
       appState.activePlanId = existing.id;
       window._activePlanId = existing.id;
       window._planSchedule = null; /* force rebuild for the edited plan */
@@ -955,6 +1048,8 @@ function pwGenerate() {
     name: finalName,
     exam: (typeof currentExam !== 'undefined' ? currentExam : null),
     createdAt: new Date().toISOString(),
+    plannerVersion: 2,
+    weightedPlanning: true,
     cfg: JSON.parse(JSON.stringify(cfg))
   };
   appState.plans.push(newPlan);
