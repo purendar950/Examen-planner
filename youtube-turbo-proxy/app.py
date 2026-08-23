@@ -899,7 +899,11 @@ def _compact_extract(raw):
     }
 
 
-def _extract(video_id, force=False):
+def _extract(video_id, force=False, cookie_retry_budget=None):
+    # Endpoints that can call _extract more than once share this mutable budget,
+    # so one browser request can never trigger multiple cookie-less fallbacks.
+    if cookie_retry_budget is None:
+        cookie_retry_budget = {"remaining": 1}
     now = time.time()
     with _cache_lock:
         hit = _cache.get(video_id)
@@ -918,8 +922,38 @@ def _extract(video_id, force=False):
                 return hit["info"], hit["compact"]
 
         url = "https://www.youtube.com/watch?v=" + video_id
-        with yt_dlp.YoutubeDL(_base_ydl_opts()) as ydl:
-            raw = ydl.extract_info(url, download=False)
+        ydl_opts = _base_ydl_opts()
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                raw = ydl.extract_info(url, download=False)
+        except yt_dlp.utils.DownloadError as exc:
+            # YouTube currently returns this exact false UNPLAYABLE response for
+            # some public videos when account cookies are supplied. Keep the
+            # cookie-first request for restricted videos, but retry this one
+            # known cookie-specific failure once without cookies. Never broaden
+            # the retry to bot gates, network failures, or unrelated extractor
+            # errors, which have their own handling at the API boundary.
+            message = " ".join(str(exc).split())
+            reload_messages = {
+                f"ERROR: [youtube] {video_id}: The page needs to be reloaded.",
+                f"[youtube] {video_id}: The page needs to be reloaded.",
+            }
+            can_retry = (
+                "cookiefile" in ydl_opts
+                and cookie_retry_budget.get("remaining", 0) > 0
+                and message in reload_messages
+            )
+            if not can_retry:
+                raise
+            cookie_retry_budget["remaining"] -= 1
+            log.warning(
+                "Cookie-authenticated extraction requested a page reload for %s; retrying once without cookies.",
+                video_id,
+            )
+            cookie_less_opts = dict(ydl_opts)
+            cookie_less_opts.pop("cookiefile", None)
+            with yt_dlp.YoutubeDL(cookie_less_opts) as ydl:
+                raw = ydl.extract_info(url, download=False)
         info = _normalize(raw)
         compact = _compact_extract(raw)
         del raw
@@ -6913,8 +6947,9 @@ def api_info():
     video_id = (request.args.get("id") or "").strip()
     if not video_id or len(video_id) != 11:
         return jsonify({"error": "missing or invalid ?id (11-char video id)"}), 400
+    cookie_retry_budget = {"remaining": 1}
     try:
-        info, _ = _extract(video_id)
+        info, _ = _extract(video_id, cookie_retry_budget=cookie_retry_budget)
         if not info["formats"]:
             return jsonify({"error": "no progressive streams available for this video"}), 404
         return jsonify(info)
@@ -6925,7 +6960,11 @@ def api_info():
             # Firestore and retry once before giving up.
             if refresh_cookies() and _cookie_source == "firestore":
                 try:
-                    info, _ = _extract(video_id, force=True)
+                    info, _ = _extract(
+                        video_id,
+                        force=True,
+                        cookie_retry_budget=cookie_retry_budget,
+                    )
                     if info["formats"]:
                         return jsonify(info)
                 except Exception:  # noqa: BLE001
@@ -15512,12 +15551,17 @@ def api_stream():
     if not video_id or not itag:
         return jsonify({"error": "need ?id and ?itag"}), 400
 
+    cookie_retry_budget = {"remaining": 1}
     try:
-        _, raw = _extract(video_id)
+        _, raw = _extract(video_id, cookie_retry_budget=cookie_retry_budget)
         direct = _direct_url(raw, itag)
         if not direct:
             # cache may be stale for this itag; force a refresh once
-            _, raw = _extract(video_id, force=True)
+            _, raw = _extract(
+                video_id,
+                force=True,
+                cookie_retry_budget=cookie_retry_budget,
+            )
             direct = _direct_url(raw, itag)
         if not direct:
             return jsonify({"error": "itag not found"}), 404
