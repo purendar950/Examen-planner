@@ -440,9 +440,39 @@
       throw error;
     });
   }
+  var REMOTE_POLICY_TIMEOUT_MS = 8000;
+  function policyDeadline(promise) {
+    var timer;
+    return Promise.race([
+      promise,
+      new Promise(function (_, reject) {
+        timer = setTimeout(function () {
+          var error = new Error('Backend routing policy timed out after ' + REMOTE_POLICY_TIMEOUT_MS + ' ms.');
+          error.name = 'BackendPolicyTimeoutError';
+          reject(error);
+        }, REMOTE_POLICY_TIMEOUT_MS);
+      })
+    ]).then(function (value) {
+      clearTimeout(timer);
+      return value;
+    }, function (error) {
+      clearTimeout(timer);
+      throw error;
+    });
+  }
   async function syncRemotePolicyBeforeRequest() {
     var handles = getFirebaseHandles();
-    if (handles && handles.db) await loadRemote();
+    if (handles && handles.db) {
+      try {
+        await policyDeadline(loadRemote());
+      } catch (error) {
+        // Only an unreachable/slow Firestore may degrade to the last saved
+        // policy. Sign-in and permission failures must still reject: they are
+        // the gate that stops token-bearing requests from being sent at all.
+        if (!error || error.name !== 'BackendPolicyTimeoutError') throw error;
+        console.warn('[backend] routing policy refresh timed out; using the last saved policy.');
+      }
+    }
     return getSnapshot();
   }
   function withTimeout(signal, ms) {
