@@ -33,6 +33,11 @@ die()  { printf '\033[1;31m✖ %s\033[0m\n' "$*" >&2; exit 1; }
 [ -z "${TERMUX_VERSION:-}" ] || die "You are still in Termux. Run 'proot-distro login ubuntu' first, then re-run this."
 [ -f "$PROXY_DIR/app.py" ] || die "Cannot find $PROXY_DIR/app.py — run this from termux-server/ inside the cloned repo."
 
+# Strip Termux's Android/bionic binaries out of PATH before anything is built
+# against them. See lib/container-path.sh for why this is essential.
+# shellcheck source=lib/container-path.sh
+. "$HERE/lib/container-path.sh"
+
 # ── System packages ────────────────────────────────────────────────────────
 # Mirrors the Dockerfile's apt line. procps gives us pgrep/ps for the
 # supervisor; ffmpeg is required by yt-dlp for muxing.
@@ -42,16 +47,36 @@ apt-get update -qq
 apt-get install -y -qq --no-install-recommends \
   python3 python3-venv python3-pip \
   git curl ca-certificates ffmpeg gnupg unzip procps xz-utils >/dev/null
-ok "python3 $(python3 --version 2>&1 | awk '{print $2}'), ffmpeg $(ffmpeg -version 2>/dev/null | head -1 | awk '{print $3}')"
+
+# Prove the interpreter really is the container's. If PATH sanitising above
+# missed something, everything downstream is silently built for the wrong
+# platform, so fail here where the cause is still obvious.
+_py="$(command -v python3 || true)"
+case "$_py" in
+  /data/data/com.termux/*) die "python3 still resolves to Termux ($_py). PATH sanitising failed; do not continue — the venv would be built for Android." ;;
+  "") die "python3 not found after apt-get install." ;;
+esac
+ok "python3 $(python3 --version 2>&1 | awk '{print $2}') at $_py"
+ok "ffmpeg $(ffmpeg -version 2>/dev/null | head -1 | awk '{print $3}')"
 
 # ── Node.js ────────────────────────────────────────────────────────────────
 # Ubuntu's archive Node is too old for bgutil's build and for the Deno-less
 # yt-dlp path (which needs >= 22), so pull NodeSource. arm64 is published.
 need_node=1
-if command -v node >/dev/null 2>&1; then
-  cur="$(node --version | sed -E 's/^v([0-9]+).*/\1/')"
-  [ "${cur:-0}" -ge "$NODE_MAJOR" ] && need_node=0 && ok "node v$(node --version | tr -d v) already adequate"
-fi
+_node="$(command -v node || true)"
+case "$_node" in
+  # Belt-and-braces: never accept a Termux node even if PATH sanitising missed
+  # it. Accepting one is what produced the pixman/canvas build failure.
+  /data/data/com.termux/*) warn "Ignoring Termux's node at $_node — installing the container's own." ;;
+  "") ;;
+  *)
+    cur="$(node --version | sed -E 's/^v([0-9]+).*/\1/')"
+    if [ "${cur:-0}" -ge "$NODE_MAJOR" ]; then
+      need_node=0
+      ok "node $(node --version) at $_node already adequate"
+    fi
+    ;;
+esac
 if [ "$need_node" -eq 1 ]; then
   say "Installing Node.js ${NODE_MAJOR}.x from NodeSource"
   curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - >/dev/null
@@ -86,6 +111,14 @@ fi
 # A venv is required on Ubuntu 24.04+ regardless of preference: PEP 668 marks
 # the system interpreter externally-managed and refuses pip installs into it.
 say "Creating the Python environment and installing requirements"
+# A venv records an absolute path to the interpreter that created it. One built
+# by Termux's python keeps using Termux's python forever, so re-running this
+# script would not repair it — it has to be discarded and rebuilt. Detect that
+# rather than silently reinstalling into a bionic environment.
+if [ -f "$VENV_DIR/pyvenv.cfg" ] && grep -q 'com\.termux' "$VENV_DIR/pyvenv.cfg" 2>/dev/null; then
+  warn "Existing venv was built with Termux's Python — discarding and rebuilding with the container's."
+  rm -rf "$VENV_DIR"
+fi
 [ -d "$VENV_DIR" ] || python3 -m venv "$VENV_DIR"
 # shellcheck disable=SC1091
 . "$VENV_DIR/bin/activate"
@@ -109,7 +142,25 @@ if [ ! -f "$BGUTIL_DIR/server/build/main.js" ]; then
 fi
 (
   cd "$BGUTIL_DIR/server"
-  npm install --no-audit --no-fund --loglevel=error
+  # Any node_modules left by a previous run with a different node (e.g. Termux's)
+  # holds native builds for the wrong platform, and npm will happily reuse them.
+  if [ -d node_modules ] && [ ! -f build/main.js ]; then
+    rm -rf node_modules
+  fi
+  # `canvas` is an OPTIONAL dependency (pulled in transitively by jsdom). With
+  # the container's glibc node, prebuild-install finds a prebuilt binary and it
+  # installs silently — which is why the project's Dockerfile needs no cairo or
+  # pixman headers. If it still fails, drop optional deps rather than dragging in
+  # a whole graphics toolchain: the PO-token server does not render anything.
+  npm install --no-audit --no-fund --loglevel=error \
+    || {
+      warn "npm install failed (usually the optional native 'canvas' build) — retrying without optional dependencies."
+      rm -rf node_modules
+      npm install --omit=optional --no-audit --no-fund --loglevel=error \
+        || die "npm install failed even without optional dependencies. See the npm log path printed above.
+  If it is still 'canvas', install its build deps and re-run:
+    apt-get install -y build-essential pkg-config libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev"
+    }
   npx --yes tsc
 )
 # Upstream's plugin/pyproject.toml points readme at "../README.md", outside the
@@ -124,7 +175,17 @@ ok "PO-token server compiled + yt-dlp plugin installed"
 
 # ── Telegram bot ───────────────────────────────────────────────────────────
 say "Installing Telegram bot dependencies"
+# Stamp which node built node_modules. If a previous run used a different one
+# (typically Termux's, before PATH sanitising existed) any native binding in the
+# tree is for the wrong platform, and npm will reuse it rather than rebuild.
+# Comparing the stamp is cheaper and more reliable than trying to detect that.
+_stamp="$BOT_DIR/node_modules/.examzen-node"
+if [ -d "$BOT_DIR/node_modules" ] && [ "$(cat "$_stamp" 2>/dev/null || echo none)" != "$(command -v node)" ]; then
+  warn "bot/node_modules was installed with a different node — reinstalling."
+  rm -rf "$BOT_DIR/node_modules"
+fi
 ( cd "$BOT_DIR" && npm install --omit=dev --no-audit --no-fund --loglevel=error )
+command -v node > "$_stamp" 2>/dev/null || true
 ok "node-telegram-bot-api + firebase-admin installed"
 
 # ── cloudflared ────────────────────────────────────────────────────────────

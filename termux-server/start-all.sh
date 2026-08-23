@@ -37,7 +37,12 @@ die()  { printf '\033[1;31m[examzen] ✖ %s\033[0m\n' "$*" >&2; exit 1; }
 [ -f "$ENV_FILE" ]  || die "Missing $ENV_FILE. Copy server.env.example to server.env and fill it in."
 [ -x "$VENV_DIR/bin/python" ] || die "Python environment missing. Run ./install.sh first."
 [ -f "$POT_MAIN" ]  || die "PO-token server missing at $POT_MAIN. Run ./install.sh first."
+# The PO-token server is launched as `node`, so it must be the container's node,
+# not Termux's leaked one. See lib/container-path.sh.
+# shellcheck source=lib/container-path.sh
+. "$HERE/lib/container-path.sh"
 command -v node >/dev/null || die "node not found. Run ./install.sh first."
+examzen_assert_not_termux node || die "Refusing to start the PO-token server with Termux's node."
 # Each service is launched with `env -C <dir>` because gunicorn resolves
 # "app:app" relative to the cwd. The -C flag needs coreutils >= 8.28; every
 # supported Ubuntu container has it, but check rather than fail cryptically.
