@@ -79,6 +79,9 @@
       '@keyframes ytRonflixSpin{to{transform:rotate(360deg)}}' +
       '.yt-ronflix-toggle{border-color:#8b5cf6!important;color:#c4b5fd!important;}' +
       '.yt-ronflix-toggle.on{background:rgba(139,92,246,.14)!important;color:#ddd6fe!important;}' +
+      '.yt-source-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:99px;font-size:0.65rem;font-weight:800;letter-spacing:.3px;margin-left:8px;vertical-align:middle;white-space:nowrap;pointer-events:none;}' +
+      '.yt-source-badge.ronflix{background:rgba(139,92,246,.14);color:#a78bfa;border:1px solid rgba(139,92,246,.3);}' +
+      '.yt-source-badge.youtube{background:rgba(255,0,0,.08);color:#f87171;border:1px solid rgba(255,0,0,.2);}' +
       '.yt-ronflix-toggle.loading{border-color:#8b5cf6!important;color:#c4b5fd!important;background:rgba(139,92,246,.08)!important;animation:ytRonflixPulse 1s ease-in-out infinite;}' +
       '@keyframes ytRonflixPulse{0%,100%{opacity:.7}50%{opacity:1}}';
     document.head.appendChild(style);
@@ -354,6 +357,7 @@
           setButtonLoading(false);
           setStatus('');
           video.style.display = 'block';
+          showSourceBadge('ronflix');
           var play = video.play();
           if (play && play.catch) {
             play.catch(function (playError) {
@@ -372,6 +376,22 @@
         setStatus('RonFlix failed: ' + (error.message || 'stream unavailable'));
         fallbackToPrevious(id, 'Try Turbo ya normal player.');
       });
+  }
+
+  function showSourceBadge(mode) {
+    var badge = document.getElementById('yt-source-badge');
+    if (!badge) return;
+    if (mode === 'ronflix') {
+      badge.textContent = '\u25c8 RonFlix Server';
+      badge.className = 'yt-source-badge ronflix';
+      badge.style.display = 'inline-flex';
+    } else if (mode === 'youtube') {
+      badge.textContent = '\u25b6 YouTube Iframe';
+      badge.className = 'yt-source-badge youtube';
+      badge.style.display = 'inline-flex';
+    } else {
+      badge.style.display = 'none';
+    }
   }
 
   function setButtonLoading(loading) {
@@ -429,7 +449,8 @@
     if (!next) {
       stopRonflix(true);
       var normalId = currentId();
-      if (validId(normalId)) restoreNormalPlayer('video', normalId);
+      if (validId(normalId)) { showSourceBadge('youtube'); restoreNormalPlayer('video', normalId); }
+      else showSourceBadge(null);
     } else {
       reloadCurrent();
     }
@@ -505,6 +526,7 @@
           updateToggleUi();
         }
         stopRonflix(false);
+        showSourceBadge(type === 'video' || type === 'playlist' ? 'youtube' : null);
         restoreNormalPlayer(type, id);
       }
     };
