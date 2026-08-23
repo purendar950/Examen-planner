@@ -188,7 +188,12 @@ ok "snapshot written: $OUT ($SIZE)"
 
 # Prove the secrets really are absent before anyone uploads this anywhere.
 say "Verifying the snapshot contains no secrets"
-if tar -tf "$OUT" 2>/dev/null | grep -E 'examzen-secrets|termux-server/server\.env' >/dev/null; then
+# Match complete archive paths only. The repository intentionally contains
+# server.env.example; a substring match would falsely treat that template as the
+# real server.env and delete an otherwise safe 1.5 GB snapshot.
+if tar -tf "$OUT" 2>/dev/null \
+    | grep -E '(^|/)opt/examzen-secrets(/|$)|(^|/)opt/examzen/termux-server/server\.env$' \
+    >/dev/null; then
   # Delete it rather than merely warning. A file this size gets uploaded later
   # from shell history without re-reading the warning that produced it, and the
   # whole point of this check is that it must be impossible to publish by
