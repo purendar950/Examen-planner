@@ -11,7 +11,7 @@
 #                                                 POT_BASE_URL to it)
 #   proxy      gunicorn app:app                   $BIND:$PROXY_PORT
 #   bot        node bot-server.js                 $BIND:$BOT_PORT
-#   tunnel     cloudflared (only if TUNNEL_NAME)  outbound only
+#   tunnel     cloudflared/helper                  outbound only (optional)
 #
 # Run in the foreground; Ctrl-C stops everything cleanly. For unattended use
 # call it from boot/start-examzen.sh via Termux:Boot.
@@ -32,6 +32,9 @@ PID_FILE="$HERE/.runtime/supervisor.pids"
 say()  { printf '\033[1;36m[examzen] %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m[examzen] ⚠ %s\033[0m\n' "$*"; }
 die()  { printf '\033[1;31m[examzen] ✖ %s\033[0m\n' "$*" >&2; exit 1; }
+enabled() {
+  case "${1:-}" in 1|true|TRUE|yes|YES|on|ON) return 0 ;; *) return 1 ;; esac
+}
 
 # ── Preflight ──────────────────────────────────────────────────────────────
 [ -f "$ENV_FILE" ]  || die "Missing $ENV_FILE. Copy server.env.example to server.env and fill it in."
@@ -57,6 +60,23 @@ BIND="${BIND:-127.0.0.1}"
 POT_PORT="${POT_PORT:-4416}"
 
 [ "$PROXY_PORT" != "$BOT_PORT" ] || die "PROXY_PORT and BOT_PORT are both $PROXY_PORT. They must differ."
+
+# Validate the selected tunnel mode before creating the PID file or starting
+# any service. A fatal tunnel configuration error must never strand otherwise
+# healthy proxy/bot process groups behind a dead top-level supervisor.
+if [ -n "${TUNNEL_NAME:-}" ]; then
+  command -v cloudflared >/dev/null 2>&1 \
+    || die "TUNNEL_NAME is set but cloudflared is not installed."
+  [ -f "${TUNNEL_CONFIG:-}" ] \
+    || die "TUNNEL_NAME=$TUNNEL_NAME but TUNNEL_CONFIG '${TUNNEL_CONFIG:-}' does not exist. Copy tunnel/cloudflared.example.yml and edit it."
+elif enabled "${QUICK_TUNNEL:-0}"; then
+  command -v cloudflared >/dev/null 2>&1 \
+    || die "QUICK_TUNNEL is enabled but cloudflared is not installed. Run ./install.sh first."
+  [ -f "$HERE/quick-tunnel.py" ] \
+    || die "QUICK_TUNNEL is enabled but $HERE/quick-tunnel.py is missing. Pull the latest code."
+  [ -n "${FIREBASE_SERVICE_ACCOUNT:-}" ] \
+    || die "QUICK_TUNNEL needs FIREBASE_SERVICE_ACCOUNT to publish each new URL."
+fi
 
 # server.env must not set a bare PORT: both services read it and would bind the
 # same port, so whichever started second would die with EADDRINUSE. Each is
@@ -209,18 +229,17 @@ supervise proxy env -C "$PROXY_DIR" \
 supervise bot env -C "$BOT_DIR" PORT="$BOT_PORT" node bot-server.js
 
 # ── 4. Tunnel (optional) ───────────────────────────────────────────────────
+# A named tunnel has a permanent domain. QUICK_TUNNEL is the no-domain
+# fallback: its random URL changes after reconnects, so quick-tunnel.py verifies
+# each URL and atomically republishes it to Firestore before clients use it.
 if [ -n "${TUNNEL_NAME:-}" ]; then
-  if command -v cloudflared >/dev/null 2>&1; then
-    if [ -f "${TUNNEL_CONFIG:-}" ]; then
-      supervise tunnel cloudflared --no-autoupdate --config "$TUNNEL_CONFIG" tunnel run "$TUNNEL_NAME"
-    else
-      die "TUNNEL_NAME=$TUNNEL_NAME but TUNNEL_CONFIG '${TUNNEL_CONFIG:-}' does not exist. Copy tunnel/cloudflared.example.yml and edit it."
-    fi
-  else
-    die "TUNNEL_NAME is set but cloudflared is not installed."
-  fi
+  supervise tunnel cloudflared --no-autoupdate --config "$TUNNEL_CONFIG" tunnel run "$TUNNEL_NAME"
+elif enabled "${QUICK_TUNNEL:-0}"; then
+  supervise tunnel "$VENV_DIR/bin/python" "$HERE/quick-tunnel.py" \
+    --local-url "http://127.0.0.1:$PROXY_PORT"
+  say "Quick Tunnel supervisor started — successful URL publication will appear in $LOG_DIR/tunnel.log."
 else
-  warn "TUNNEL_NAME is empty — running locally only. The app cannot reach a http:// origin from an https:// page, so set up the tunnel before cutting over."
+  warn "No tunnel enabled — running locally only. Set QUICK_TUNNEL=1 for automatic no-domain mode, or configure TUNNEL_NAME."
 fi
 
 cat <<EOF
