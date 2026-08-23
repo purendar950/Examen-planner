@@ -28,6 +28,7 @@ jobs:
   frontend:
     name: JS syntax + unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 
@@ -47,6 +48,7 @@ jobs:
   backend:
     name: Turbo proxy (Python)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 
