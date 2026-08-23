@@ -82,7 +82,32 @@ unset RENDER_EXTERNAL_URL RENDER_INSTANCE_ID RENDER_SERVICE_NAME \
 # overridden — so create its directory explicitly, not via RUNTIME_DIR.
 mkdir -p "$LOG_DIR" "$RUNTIME_DIR" "$(dirname "$PID_FILE")" \
          "${COOKIE_CACHE_DIR:-/opt/examzen-state}"
+
+# ── Refuse to run a second supervisor ──────────────────────────────────────
+# Two supervisors fight over the same ports: the newcomer's gunicorn cannot bind
+# :$PROXY_PORT, and the older one — whose children may have just been killed by
+# stop-all.sh — notices they are gone, prints "All services stopped." and exits.
+# When both were launched with `> logs/supervisor.log`, each holds its own file
+# offset, so that dying message lands AFTER the new instance's start-up banner
+# and reads as though the NEW server died. Diagnosing that from the log is
+# near-impossible, so refuse the second start outright.
+if [ -f "$PID_FILE" ]; then
+  while read -r _pid _name; do
+    [ -n "${_pid:-}" ] || continue
+    if kill -0 "$_pid" 2>/dev/null; then
+      die "Already running (${_name:-process} is pid $_pid).
+  Stop it first:   ./stop-all.sh
+  Or check it:     ./health.sh"
+    fi
+  done < "$PID_FILE"
+fi
+
 : > "$PID_FILE"
+# Record the supervisor itself, FIRST. stop-all.sh previously only knew about the
+# per-service subshells, so it left this process alive to flail and log
+# misleadingly. Listing it first also means stop-all.sh signals it before the
+# services, letting its own TERM trap perform the ordered teardown.
+printf '%s supervisor\n' "$$" >> "$PID_FILE"
 
 # ── Supervision ────────────────────────────────────────────────────────────
 # Each service runs in a restart loop with exponential backoff. A service that

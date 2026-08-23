@@ -15,11 +15,27 @@ if [ ! -f "$PID_FILE" ]; then
   exit 0
 fi
 
+# The supervisor is listed first and must be signalled BY PID ONLY, never by
+# process group. When start-all.sh runs in the foreground its process group can
+# be the interactive shell's, so `kill -- -$pid` would take the user's own
+# terminal down with it. Signalling it plainly is also sufficient: its TERM trap
+# performs the ordered teardown of every service. Stopping it first additionally
+# prevents it from noticing its children vanish and logging "All services
+# stopped." over a newer instance's output.
+_signal() {   # _signal <SIG> <pid> <name>
+  if [ "$3" = supervisor ]; then
+    kill -"$1" "$2" 2>/dev/null || true
+  else
+    # Negative pid targets the process group, taking gunicorn's workers with it.
+    kill -"$1" "-$2" 2>/dev/null || kill -"$1" "$2" 2>/dev/null || true
+  fi
+}
+
 while read -r pid name; do
   [ -n "${pid:-}" ] || continue
+  name="${name:-process}"
   if kill -0 "$pid" 2>/dev/null; then
-    # Negative pid targets the process group, taking gunicorn workers with it.
-    kill -TERM "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+    _signal TERM "$pid" "$name"
     echo "stopped $name (pid $pid)"
   else
     echo "$name (pid $pid) was not running"
@@ -29,7 +45,8 @@ done < "$PID_FILE"
 sleep 2
 while read -r pid name; do
   [ -n "${pid:-}" ] || continue
-  kill -0 "$pid" 2>/dev/null && { kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true; echo "force-killed $name"; }
+  name="${name:-process}"
+  kill -0 "$pid" 2>/dev/null && { _signal KILL "$pid" "$name"; echo "force-killed $name"; }
 done < "$PID_FILE"
 
 rm -f "$PID_FILE"
