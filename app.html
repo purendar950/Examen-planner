@@ -391,13 +391,16 @@
         <input type="hidden" id="sp-morning-hours" value="3">
         <input type="hidden" id="sp-evening-hours" value="3">
 
-        <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:4px;">😴 Weekly Rest Day</label>
-        <select id="sp-rest-day" style="width:100%;margin-bottom:.85rem;padding:.5rem .75rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.82rem;">
-          <option value="-1">No Rest Day</option>
-          <option value="0">Sunday</option>
-          <option value="6">Saturday</option>
-          <option value="5">Friday</option>
-        </select>
+        <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:6px;">😴 Rest Days</label>
+        <div id="sp-rest-days" class="days-grid" style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin-bottom:.85rem;">
+          <label title="Sunday" style="display:flex;align-items:center;justify-content:center;height:32px;background:var(--surface);border:1px solid var(--border);border-radius:7px;cursor:pointer;"><input type="checkbox" class="sp-rest-check" value="0" aria-label="Sunday" style="accent-color:var(--accent);"><span style="font-size:.62rem;font-weight:700;color:var(--muted);margin-left:3px;">S</span></label>
+          <label title="Monday" style="display:flex;align-items:center;justify-content:center;height:32px;background:var(--surface);border:1px solid var(--border);border-radius:7px;cursor:pointer;"><input type="checkbox" class="sp-rest-check" value="1" aria-label="Monday" style="accent-color:var(--accent);"><span style="font-size:.62rem;font-weight:700;color:var(--muted);margin-left:3px;">M</span></label>
+          <label title="Tuesday" style="display:flex;align-items:center;justify-content:center;height:32px;background:var(--surface);border:1px solid var(--border);border-radius:7px;cursor:pointer;"><input type="checkbox" class="sp-rest-check" value="2" aria-label="Tuesday" style="accent-color:var(--accent);"><span style="font-size:.62rem;font-weight:700;color:var(--muted);margin-left:3px;">T</span></label>
+          <label title="Wednesday" style="display:flex;align-items:center;justify-content:center;height:32px;background:var(--surface);border:1px solid var(--border);border-radius:7px;cursor:pointer;"><input type="checkbox" class="sp-rest-check" value="3" aria-label="Wednesday" style="accent-color:var(--accent);"><span style="font-size:.62rem;font-weight:700;color:var(--muted);margin-left:3px;">W</span></label>
+          <label title="Thursday" style="display:flex;align-items:center;justify-content:center;height:32px;background:var(--surface);border:1px solid var(--border);border-radius:7px;cursor:pointer;"><input type="checkbox" class="sp-rest-check" value="4" aria-label="Thursday" style="accent-color:var(--accent);"><span style="font-size:.62rem;font-weight:700;color:var(--muted);margin-left:3px;">T</span></label>
+          <label title="Friday" style="display:flex;align-items:center;justify-content:center;height:32px;background:var(--surface);border:1px solid var(--border);border-radius:7px;cursor:pointer;"><input type="checkbox" class="sp-rest-check" value="5" aria-label="Friday" style="accent-color:var(--accent);"><span style="font-size:.62rem;font-weight:700;color:var(--muted);margin-left:3px;">F</span></label>
+          <label title="Saturday" style="display:flex;align-items:center;justify-content:center;height:32px;background:var(--surface);border:1px solid var(--border);border-radius:7px;cursor:pointer;"><input type="checkbox" class="sp-rest-check" value="6" aria-label="Saturday" style="accent-color:var(--accent);"><span style="font-size:.62rem;font-weight:700;color:var(--muted);margin-left:3px;">S</span></label>
+        </div>
 
         <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:6px;">⚠️ Weak Subjects <span style="font-weight:400;color:var(--muted);">(AI inhe prioritize karega)</span></label>
         <div id="sp-sub-checkboxes" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:1.25rem;min-height:32px;">
