@@ -85,7 +85,10 @@ fi
 if [ -n "$PUBLIC_URL" ]; then
   printf '\n══ public hostname ══\n\n'
   url="${PUBLIC_URL%/}"
-  printf '%-26s' "GET $url/health"
+  # Trailing separator rather than %-26s padding: a tunnel hostname is usually
+  # longer than the pad width, so the status code ended up jammed straight onto
+  # the URL ("...health530") and read as part of it.
+  printf 'GET %s/health → ' "$url"
   code="$(curl -s -o /tmp/examzen-pub.json -w '%{http_code}' --max-time 25 "$url/health" 2>/dev/null)"
   case "${code:-000}" in
     200) green "200\n"
@@ -94,9 +97,21 @@ if [ -n "$PUBLIC_URL" ]; then
            https://*) printf '   '; green "https — accepted by the app\n" ;;
            *) printf '   '; red "not https — backend-router.js will refuse this and the admin panel will not accept it\n"; rc=1 ;;
          esac ;;
-    000) red "no response\n"; printf '   %s\n' "→ tunnel down or DNS not propagated; tail $HERE/logs/tunnel.log"; rc=1 ;;
-    502|503) red "$code\n"; printf '   %s\n' "→ the tunnel is up but cannot reach the local service; check the ingress port in your cloudflared config"; rc=1 ;;
-    *)   red "$code\n"; rc=1 ;;
+    000) red "no response\n"; printf '   %s\n' "→ DNS did not resolve or nothing answered. Check the hostname, and tail $HERE/logs/tunnel.log"; rc=1 ;;
+    # 530 is Cloudflare's own error 1033 and by far the most common failure here:
+    # the edge is reachable but no tunnel is registered for this hostname. It
+    # means cloudflared died or never connected — NOT that the app is broken.
+    # Worth stating outright, because the bare number looks like an app error.
+    530) red "530\n"
+         printf '   %s\n' "→ Cloudflare answered but no tunnel is connected for this hostname (their error 1033)."
+         printf '   %s\n' "  cloudflared is not running. Restart it, then re-test."
+         printf '   %s\n' "  NOTE: a quick 'cloudflared tunnel --url' tunnel issues a NEW random URL every"
+         printf '   %s\n' "  restart, so the old trycloudflare.com address is now dead — update the app."
+         rc=1 ;;
+    502|503|504) red "$code\n"; printf '   %s\n' "→ the tunnel is up but cannot reach the local service. Check that the ingress port matches PROXY_PORT ($PROXY_PORT) and that ./health.sh passes locally"; rc=1 ;;
+    404) red "404\n"; printf '   %s\n' "→ the tunnel is up but this hostname has no matching ingress rule; check tunnel/cloudflared.yml"; rc=1 ;;
+    403) red "403\n"; printf '   %s\n' "→ blocked before reaching the app — usually Cloudflare Access sitting in front of the hostname"; rc=1 ;;
+    *)   red "${code:-000}\n"; printf '   %s\n' "→ unexpected status; body follows:"; head -c 200 /tmp/examzen-pub.json 2>/dev/null; printf '\n'; rc=1 ;;
   esac
   rm -f /tmp/examzen-pub.json
 fi
