@@ -1,0 +1,36 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Copy to cloudflared.yml and replace the UUID and hostnames.
+#
+# TWO hostnames, one per service, and each service must live at the ROOT of its
+# hostname. That is not a style choice: the admin panel's URL validator
+# (js/admin/admin-actions.js normalizeBackendProxyRoot) rejects any backend URL
+# whose pathname is not empty or exactly "/", so you cannot put the proxy at
+# https://one-host.example/proxy and the bot at /bot. Path-based routing on a
+# single hostname will be refused when you try to save it.
+# ═══════════════════════════════════════════════════════════════════════════
+
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: /root/.cloudflared/REPLACE_WITH_TUNNEL_UUID.json
+
+ingress:
+  # ── youtube-turbo-proxy: media + AI. Goes in Admin → Server Role Routing. ──
+  - hostname: examzen-api.example.com
+    service: http://127.0.0.1:8080
+    originRequest:
+      connectTimeout: 30s
+      tcpKeepAlive: 30s
+      # AI/study requests stream for minutes. cloudflared's default 100s idle
+      # ceiling would cut a long generation off mid-stream, which surfaces in
+      # the browser as a truncated answer rather than an error.
+      noTLSVerify: false
+      keepAliveTimeout: 90s
+
+  # ── examzen-telegram-bot: relay, /calc and /addmock Mini Apps, digests. ──
+  - hostname: examzen-bot.example.com
+    service: http://127.0.0.1:3000
+    originRequest:
+      connectTimeout: 30s
+      tcpKeepAlive: 30s
+
+  # Required final rule: anything else gets a 404 instead of being proxied.
+  - service: http_status:404

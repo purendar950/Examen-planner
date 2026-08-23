@@ -144,8 +144,18 @@ COOKIE_REFRESH_SEC = int(os.environ.get("COOKIE_REFRESH_SEC", "600"))
 # yt-dlp REWRITES the cookie file after each request (to persist refreshed
 # tokens), so the file it uses MUST be writable. Render secret files and mounted
 # cookie files are read-only, so we always resolve the cookie source into a
-# writable copy under /tmp and hand THAT to yt-dlp.
-WRITABLE_COOKIES = "/tmp/yt-cookies.txt"
+# writable copy in a temp dir and hand THAT to yt-dlp.
+#
+# The directory is NOT hardcoded to /tmp: tempfile.gettempdir() honours $TMPDIR,
+# which is what makes this work off-Render. Termux has no /tmp at all (its temp
+# dir is $PREFIX/tmp), so a literal "/tmp/..." path fails at boot with ENOENT
+# and every extraction then runs cookie-less — i.e. age-restricted and
+# bot-checked videos break with no obvious cause. COOKIE_CACHE_DIR overrides it
+# outright for hosts that want the file on persistent storage instead.
+WRITABLE_COOKIES = os.path.join(
+    os.environ.get("COOKIE_CACHE_DIR") or tempfile.gettempdir(),
+    "yt-cookies.txt",
+)
 
 COOKIES_FILE = None      # path handed to yt-dlp (set once cookies are resolved)
 _HAS_COOKIES = False
@@ -179,6 +189,11 @@ def _init_firebase():
 
 
 def _write_cookies(text):
+    # A COOKIE_CACHE_DIR pointing at persistent storage may not exist yet on a
+    # self-hosted box, and the system temp dir can be missing in stripped-down
+    # containers. Creating it here keeps both callers (Firestore + env/file) from
+    # failing on ENOENT alone.
+    os.makedirs(os.path.dirname(WRITABLE_COOKIES) or ".", exist_ok=True)
     with open(WRITABLE_COOKIES, "w") as fh:
         fh.write(text)
     return WRITABLE_COOKIES
@@ -207,6 +222,7 @@ def _load_cookies_from_env_or_file():
         if env_cookies:
             return _write_cookies(env_cookies), "env"
         if src_file and os.path.exists(src_file):
+            os.makedirs(os.path.dirname(WRITABLE_COOKIES) or ".", exist_ok=True)
             shutil.copyfile(src_file, WRITABLE_COOKIES)
             return WRITABLE_COOKIES, "file"
     except OSError as exc:
