@@ -14,3 +14,13 @@ __pycache__/
 
 # Firestore rules are managed directly in the Firebase console, not in the repo
 firestore.rules
+
+
+# Self-hosted Termux/private server. server.env holds the Telegram bot token,
+# the Firebase service account and AI provider keys — the same values that are
+# `sync: false` (dashboard-only) in render.yaml. Never commit it.
+termux-server/server.env
+termux-server/logs/
+termux-server/.runtime/
+termux-server/tunnel/cloudflared.yml
+youtube-turbo-proxy/.venv/
