@@ -947,11 +947,25 @@ def _extract(video_id, force=False, cookie_retry_budget=None):
                 raise
             cookie_retry_budget["remaining"] -= 1
             log.warning(
-                "Cookie-authenticated extraction requested a page reload for %s; retrying once without cookies.",
+                "Cookie-authenticated extraction requested a page reload for %s; retrying once without cookies using a progressive client.",
                 video_id,
             )
             cookie_less_opts = dict(ydl_opts)
             cookie_less_opts.pop("cookiefile", None)
+            # Current cookie-less default clients can return only split
+            # video+audio tracks (for example 616+251-2). Turbo deliberately
+            # proxies one range-addressable file into one native <video>, so
+            # request android_vr here: it exposes progressive MP4 itag 18 with
+            # H.264 video + AAC audio over HTTPS. Merge rather than replace the
+            # extractor args so the JS solver and bgutil PO-token settings stay.
+            retry_extractor_args = {
+                name: dict(values)
+                for name, values in (cookie_less_opts.get("extractor_args") or {}).items()
+            }
+            youtube_args = dict(retry_extractor_args.get("youtube") or {})
+            youtube_args["player_client"] = ["android_vr"]
+            retry_extractor_args["youtube"] = youtube_args
+            cookie_less_opts["extractor_args"] = retry_extractor_args
             with yt_dlp.YoutubeDL(cookie_less_opts) as ydl:
                 raw = ydl.extract_info(url, download=False)
         info = _normalize(raw)
