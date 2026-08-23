@@ -46,7 +46,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends \
   python3 python3-venv python3-pip \
-  git curl ca-certificates ffmpeg gnupg unzip procps xz-utils >/dev/null
+  git curl ca-certificates ffmpeg gnupg unzip procps xz-utils nano >/dev/null
 
 # Prove the interpreter really is the container's. If PATH sanitising above
 # missed something, everything downstream is silently built for the wrong
