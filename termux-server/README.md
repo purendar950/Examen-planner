@@ -242,7 +242,8 @@ chmod +x ~/examzen-backup.sh
 ~/examzen-backup.sh --with-secrets
 ```
 
-GPG asks you to create a password. Do not forget it: the password cannot be
+The script asks you to create a password directly in the Termux terminal; typing
+is hidden and no dots appear. Do not forget it: the password cannot be
 recovered. The command creates two files in the Termux home directory:
 
 - `examzen-ubuntu-YYYYMMDD.tar.gz` — prebuilt dependencies, with no secrets.
@@ -294,7 +295,10 @@ chmod +x ~/restore.sh
   ~/storage/downloads/examzen-ubuntu-YYYYMMDD.secrets.tar.gpg
 ```
 
-Enter the GPG password created during backup. `restore.sh` refuses to overwrite
+At the `Backup password (typing is hidden):` prompt, enter the password
+created during backup; no characters or dots appear while typing. The password
+is checked before the 1.5 GB container is installed, so a typo leaves the device
+unchanged and you can immediately retry. `restore.sh` then refuses to overwrite
 an existing container, verifies that the prebuilt venv, gunicorn, PO-token
 server, Node dependencies, and Python imports survived, restores both secret
 files, and automatically applies directory mode `700` and file mode `600`.
