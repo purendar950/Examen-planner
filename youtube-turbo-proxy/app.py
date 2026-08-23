@@ -75,7 +75,7 @@ ALLOWED_ORIGINS = tuple(dict.fromkeys(
 # credentialed GET was rejected because the response lacked the credentials
 # allow-flag.
 CORS(app, origins=ALLOWED_ORIGINS, methods=["GET", "POST", "DELETE", "OPTIONS"],
-     allow_headers=["Authorization", "Content-Type"],
+     allow_headers=["Authorization", "Content-Type", "Range"],
      expose_headers=["X-Image-Provider", "X-Image-Model"],
      supports_credentials=True)
 
@@ -115,7 +115,7 @@ def _ensure_cors_headers(response):
     response.headers["Vary"] = "Origin"
     response.headers["Access-Control-Allow-Credentials"] = "true"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+    response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, Range"
     if request.method == "OPTIONS" and "Access-Control-Max-Age" not in response.headers:
         response.headers["Access-Control-Max-Age"] = "86400"
     return response
@@ -885,13 +885,54 @@ def _normalize(info):
     }
 
 
+_STREAM_REQUEST_HEADER_NAMES = {
+    "accept": "Accept",
+    "accept-encoding": "Accept-Encoding",
+    "accept-language": "Accept-Language",
+    "origin": "Origin",
+    "referer": "Referer",
+    "sec-fetch-dest": "Sec-Fetch-Dest",
+    "sec-fetch-mode": "Sec-Fetch-Mode",
+    "sec-fetch-site": "Sec-Fetch-Site",
+    "user-agent": "User-Agent",
+    "x-youtube-client-name": "X-YouTube-Client-Name",
+    "x-youtube-client-version": "X-YouTube-Client-Version",
+}
+
+
+def _safe_stream_request_headers(value):
+    """Keep only non-secret yt-dlp headers needed to replay a format URL."""
+    if not isinstance(value, dict):
+        return {}
+    safe = {}
+    for raw_name, raw_value in value.items():
+        if not isinstance(raw_name, str) or not isinstance(raw_value, str):
+            continue
+        name = _STREAM_REQUEST_HEADER_NAMES.get(raw_name.strip().lower())
+        header_value = raw_value.strip()
+        if not name or not header_value or any(ch in header_value for ch in "\r\n\0"):
+            continue
+        safe[name] = header_value
+    return safe
+
+
 def _compact_extract(raw):
+    formats = []
+    common_headers = _safe_stream_request_headers(raw.get("http_headers"))
+    for fmt in raw.get("formats") or []:
+        if not fmt.get("format_id") or not fmt.get("url"):
+            continue
+        compact_format = {
+            "format_id": str(fmt.get("format_id")),
+            "url": fmt.get("url"),
+        }
+        http_headers = dict(common_headers)
+        http_headers.update(_safe_stream_request_headers(fmt.get("http_headers")))
+        if http_headers:
+            compact_format["http_headers"] = http_headers
+        formats.append(compact_format)
     return {
-        "formats": [
-            {"format_id": str(fmt.get("format_id")), "url": fmt.get("url")}
-            for fmt in (raw.get("formats") or [])
-            if fmt.get("format_id") and fmt.get("url")
-        ],
+        "formats": formats,
         "subtitles": raw.get("subtitles") or {},
         "automatic_captions": raw.get("automatic_captions") or {},
         "title": raw.get("title"),
@@ -977,10 +1018,13 @@ def _extract(video_id, force=False, cookie_retry_budget=None):
     return info, compact
 
 
-def _direct_url(extraction, itag):
-    for f in extraction.get("formats", []):
-        if str(f.get("format_id")) == str(itag) and f.get("url"):
-            return f["url"]
+def _direct_format(extraction, itag):
+    for fmt in extraction.get("formats", []):
+        if str(fmt.get("format_id")) == str(itag) and fmt.get("url"):
+            return {
+                "url": fmt["url"],
+                "http_headers": dict(fmt.get("http_headers") or {}),
+            }
     return None
 
 
@@ -15568,22 +15612,25 @@ def api_stream():
     cookie_retry_budget = {"remaining": 1}
     try:
         _, raw = _extract(video_id, cookie_retry_budget=cookie_retry_budget)
-        direct = _direct_url(raw, itag)
-        if not direct:
+        stream_format = _direct_format(raw, itag)
+        if not stream_format:
             # cache may be stale for this itag; force a refresh once
             _, raw = _extract(
                 video_id,
                 force=True,
                 cookie_retry_budget=cookie_retry_budget,
             )
-            direct = _direct_url(raw, itag)
-        if not direct:
+            stream_format = _direct_format(raw, itag)
+        if not stream_format:
             return jsonify({"error": "itag not found"}), 404
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "extract_failed", "detail": str(exc)[:200]}), 502
 
-    # Forward the browser's Range header so seeking works
-    fwd_headers = {}
+    # Replay only yt-dlp's allowlisted request identity for this exact format.
+    # Never copy browser Authorization/Cookie/Origin headers to googlevideo.
+    # The browser's seek Range is the sole client header and always wins.
+    direct = stream_format["url"]
+    fwd_headers = _safe_stream_request_headers(stream_format.get("http_headers"))
     rng = request.headers.get("Range")
     if rng:
         fwd_headers["Range"] = rng
