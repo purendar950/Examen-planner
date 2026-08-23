@@ -15626,15 +15626,56 @@ def api_stream():
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "extract_failed", "detail": str(exc)[:200]}), 502
 
-    # Replay only yt-dlp's allowlisted request identity for this exact format.
-    # Never copy browser Authorization/Cookie/Origin headers to googlevideo.
     # Browser seek ranges win; the initial native-video request may omit Range,
     # so start it at byte zero rather than let googlevideo reject it with 403.
-    direct = stream_format["url"]
-    fwd_headers = _safe_stream_request_headers(stream_format.get("http_headers"))
-    fwd_headers["Range"] = request.headers.get("Range") or "bytes=0-"
+    range_header = request.headers.get("Range") or "bytes=0-"
 
-    upstream = requests.get(direct, headers=fwd_headers, stream=True, timeout=REQUEST_TIMEOUT)
+    def open_upstream(current_format):
+        # Replay only yt-dlp's allowlisted request identity for this exact
+        # format. Never copy browser Authorization/Cookie/Origin headers.
+        headers = _safe_stream_request_headers(current_format.get("http_headers"))
+        headers["Range"] = range_header
+        return requests.get(
+            current_format["url"],
+            headers=headers,
+            stream=True,
+            timeout=REQUEST_TIMEOUT,
+        )
+
+    # A cached format URL can expire or be revoked inside CACHE_TTL, which
+    # googlevideo reports as 403/410. Re-extract once so playback self-heals.
+    # Only the opening request may pay for this: re-extracting on every rejected
+    # mid-playback seek would serialize repeated yt-dlp runs behind the phone's
+    # small worker pool and stall /health, /api/info and transcripts.
+    may_refresh = range_header.startswith("bytes=0-")
+    try:
+        upstream = open_upstream(stream_format)
+    except requests.RequestException:
+        # Never echo the signed googlevideo URL (it carries `ip=` and tokens).
+        return jsonify({"error": "stream_upstream_unreachable"}), 502
+    if may_refresh and upstream.status_code in (403, 410):
+        upstream.close()
+        app.logger.warning(
+            "Turbo upstream returned %s for %s itag %s; refreshing extraction once.",
+            upstream.status_code,
+            video_id,
+            itag,
+        )
+        try:
+            _, raw = _extract(
+                video_id,
+                force=True,
+                cookie_retry_budget=cookie_retry_budget,
+            )
+            refreshed_format = _direct_format(raw, itag)
+        except Exception:  # noqa: BLE001
+            return jsonify({"error": "stream_refresh_failed"}), 502
+        if not refreshed_format:
+            return jsonify({"error": "itag not found after refresh"}), 404
+        try:
+            upstream = open_upstream(refreshed_format)
+        except requests.RequestException:
+            return jsonify({"error": "stream_upstream_unreachable"}), 502
 
     def generate():
         try:

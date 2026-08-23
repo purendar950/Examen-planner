@@ -471,7 +471,10 @@
     var iframeEl = document.getElementById('yt-player');
     if (iframeEl) iframeEl.style.display = 'block';
     showBadge(false);
-    status('⚡ Turbo: fetching stream… (first load can take ~30–60s if the server was asleep)');
+    // This phase covers routing-policy sync plus metadata extraction, so it is
+    // not evidence that a server is asleep. Keep a realistic expectation: a
+    // cold Render instance and a first extraction can each take a while.
+    status('⚡ Turbo: contacting media server and reading video info… (up to ~60s on a cold server)');
 
     var ctrl = new AbortController();
     turboLoadController = ctrl;
