@@ -65,6 +65,7 @@ def fetch(video: str, lang: str = "en"):
             "quiet": True,
             "no_warnings": True,
             "noprogress": True,
+            "format": "worst",              # Avoid "format not available" errors when extracting captions
             # KEY: the 'android' player client bypasses YouTube's soft
             # caption-gate far better than 'web' when running without cookies.
             "extractor_args": {"youtube": {"player_client": ["android"]}},

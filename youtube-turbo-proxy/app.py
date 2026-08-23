@@ -946,6 +946,10 @@ def _transcript_ydl_opts(client):
     ea = dict(opts.get("extractor_args") or {})
     ea["youtube"] = {"player_client": [client]}
     opts["extractor_args"] = ea
+    # Format selection: use worst quality to avoid "format not available" errors
+    # when we're only extracting captions (skip_download=True). This prevents
+    # yt-dlp from erroring out if a specific format is unavailable.
+    opts["format"] = "worst"
     return opts
 
 
