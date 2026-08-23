@@ -136,6 +136,14 @@ CACHE_TTL = int(os.environ.get("CACHE_TTL", "18000"))       # 5h (URLs expire ~6
 MAX_HEIGHT = int(os.environ.get("MAX_HEIGHT", "720"))       # cap resolution
 REQUEST_TIMEOUT = 20
 VIDEO_CACHE_MAX = max(4, int(os.environ.get("VIDEO_CACHE_MAX", "16")))
+# Upstream window size for /api/stream. googlevideo rejects an unbounded range
+# on format URLs (verified: 1 MiB -> 206, whole-file and open-ended -> 403), so
+# the file is pulled as a sequence of bounded windows and rejoined downstream.
+# 1 MiB keeps time-to-first-byte low on a phone uplink while limiting how many
+# upstream round trips a full lecture needs.
+STREAM_CHUNK_BYTES = max(
+    65536, int(os.environ.get("STREAM_CHUNK_BYTES", str(1024 * 1024)))
+)
 
 # How often to re-read cookies from Firestore so an admin's paste in the panel
 # takes effect without a redeploy. Default 10 min.
@@ -898,6 +906,47 @@ _STREAM_REQUEST_HEADER_NAMES = {
     "x-youtube-client-name": "X-YouTube-Client-Name",
     "x-youtube-client-version": "X-YouTube-Client-Version",
 }
+
+
+def _parse_browser_range(value):
+    """Return (start, end) for a single `bytes=` range; end may be None.
+
+    Only the simple forms a native <video> sends are honoured. A missing or
+    unparseable header streams from byte zero, matching the previous behaviour.
+    An unsatisfiable header returns (None, None) so the caller can answer 416.
+    """
+    text = str(value or "").strip().lower()
+    if not text:
+        return 0, None
+    if not text.startswith("bytes="):
+        return 0, None
+    spec = text[len("bytes="):].split(",", 1)[0].strip()
+    if "-" not in spec:
+        return None, None
+    first, _, last = spec.partition("-")
+    first, last = first.strip(), last.strip()
+    if not first:
+        # A suffix range ("bytes=-500") needs the total size, which is only
+        # known after the first upstream window. Serve the whole file instead.
+        return 0, None
+    if not first.isdigit() or (last and not last.isdigit()):
+        return None, None
+    start = int(first)
+    if not last:
+        return start, None
+    end = int(last)
+    if end < start:
+        return None, None
+    return start, end
+
+
+def _content_range_total(value):
+    """Total resource size from an upstream `Content-Range`, else 0."""
+    text = str(value or "").strip()
+    if "/" not in text:
+        return 0
+    total = text.rsplit("/", 1)[1].strip()
+    return int(total) if total.isdigit() else 0
 
 
 def _safe_stream_request_headers(value):
@@ -15626,15 +15675,25 @@ def api_stream():
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "extract_failed", "detail": str(exc)[:200]}), 502
 
-    # Browser seek ranges win; the initial native-video request may omit Range,
-    # so start it at byte zero rather than let googlevideo reject it with 403.
-    range_header = request.headers.get("Range") or "bytes=0-"
+    # googlevideo refuses an unbounded range on these format URLs. Measured
+    # against a live phone tunnel for itag 18 (159 MB file):
+    #   Range: bytes=0-1048575   -> 206
+    #   Range: bytes=0-<eof>     -> 403
+    #   Range: bytes=0-          -> 403
+    #   no Range header          -> 403
+    # A native <video> opens with NO Range, so the whole file must be pulled as
+    # a sequence of bounded windows, exactly as yt-dlp's --http-chunk-size does,
+    # and re-joined into one continuous response for the browser.
+    wants_range = "Range" in request.headers
+    start, requested_end = _parse_browser_range(request.headers.get("Range"))
+    if start is None:
+        return Response(status=416, headers={"Accept-Ranges": "bytes"})
 
-    def open_upstream(current_format):
+    def open_window(current_format, first_byte, last_byte):
         # Replay only yt-dlp's allowlisted request identity for this exact
         # format. Never copy browser Authorization/Cookie/Origin headers.
         headers = _safe_stream_request_headers(current_format.get("http_headers"))
-        headers["Range"] = range_header
+        headers["Range"] = f"bytes={first_byte}-{last_byte}"
         return requests.get(
             current_format["url"],
             headers=headers,
@@ -15642,18 +15701,23 @@ def api_stream():
             timeout=REQUEST_TIMEOUT,
         )
 
-    # A cached format URL can expire or be revoked inside CACHE_TTL, which
-    # googlevideo reports as 403/410. Re-extract once so playback self-heals.
-    # Only the opening request may pay for this: re-extracting on every rejected
-    # mid-playback seek would serialize repeated yt-dlp runs behind the phone's
-    # small worker pool and stall /health, /api/info and transcripts.
-    may_refresh = range_header.startswith("bytes=0-")
+    def window_end(first_byte):
+        last_byte = first_byte + STREAM_CHUNK_BYTES - 1
+        if requested_end is not None:
+            last_byte = min(last_byte, requested_end)
+        return last_byte
+
+    # A cached format URL can also expire or be revoked inside CACHE_TTL, which
+    # googlevideo likewise reports as 403/410. Re-extract once so playback
+    # self-heals, but only for the opening window: re-extracting on every
+    # rejected mid-playback seek would serialize repeated yt-dlp runs behind the
+    # phone's small worker pool and stall /health, /api/info and transcripts.
     try:
-        upstream = open_upstream(stream_format)
+        upstream = open_window(stream_format, start, window_end(start))
     except requests.RequestException:
         # Never echo the signed googlevideo URL (it carries `ip=` and tokens).
         return jsonify({"error": "stream_upstream_unreachable"}), 502
-    if may_refresh and upstream.status_code in (403, 410):
+    if upstream.status_code in (403, 410):
         upstream.close()
         app.logger.warning(
             "Turbo upstream returned %s for %s itag %s; refreshing extraction once.",
@@ -15672,18 +15736,60 @@ def api_stream():
             return jsonify({"error": "stream_refresh_failed"}), 502
         if not refreshed_format:
             return jsonify({"error": "itag not found after refresh"}), 404
+        stream_format = refreshed_format
         try:
-            upstream = open_upstream(refreshed_format)
+            upstream = open_window(stream_format, start, window_end(start))
         except requests.RequestException:
             return jsonify({"error": "stream_upstream_unreachable"}), 502
 
-    def generate():
+    if upstream.status_code >= 400:
+        status = upstream.status_code
+        upstream.close()
+        return jsonify({"error": "stream_rejected", "status": status}), status
+
+    total_size = _content_range_total(upstream.headers.get("Content-Range"))
+    end = requested_end if requested_end is not None else (
+        total_size - 1 if total_size else None
+    )
+
+    def generate(first_upstream, first_byte, last_byte):
+        current = first_upstream
+        position = first_byte
         try:
-            for chunk in upstream.iter_content(chunk_size=64 * 1024):
-                if chunk:
-                    yield chunk
+            while True:
+                delivered = 0
+                for chunk in current.iter_content(chunk_size=64 * 1024):
+                    if chunk:
+                        delivered += len(chunk)
+                        position += len(chunk)
+                        yield chunk
+                current.close()
+                current = None
+                if last_byte is None or position > last_byte:
+                    return
+                # A window that yields nothing would leave `position` unchanged
+                # and spin this loop against googlevideo forever. Stop instead:
+                # the browser reports a truncated body and can re-request.
+                if not delivered:
+                    app.logger.warning(
+                        "Turbo window at byte %s for %s itag %s returned no data; ending the response.",
+                        position, video_id, itag,
+                    )
+                    return
+                # The window closed on its boundary; open the next one.
+                current = open_window(stream_format, position, min(
+                    position + STREAM_CHUNK_BYTES - 1, last_byte))
+                if current.status_code >= 400:
+                    app.logger.warning(
+                        "Turbo window at byte %s for %s itag %s failed with %s; ending the response.",
+                        position, video_id, itag, current.status_code,
+                    )
+                    return
         finally:
-            upstream.close()
+            # Covers normal completion, a client disconnect (GeneratorExit) and
+            # any upstream transport error, so no socket is left open.
+            if current is not None:
+                current.close()
 
     origin = request.headers.get("Origin", "").rstrip("/")
     resp_headers = {
@@ -15697,13 +15803,18 @@ def api_stream():
     if origin in ALLOWED_ORIGINS:
         resp_headers["Access-Control-Allow-Origin"] = origin
         resp_headers["Vary"] = "Origin"
-    for h in ("Content-Length", "Content-Range"):
-        if h in upstream.headers:
-            resp_headers[h] = upstream.headers[h]
+    if end is not None:
+        resp_headers["Content-Length"] = str(end - start + 1)
+    # Report the span this response really carries, not the single upstream
+    # window it opened with, so the browser can seek across the whole file.
+    if wants_range and total_size:
+        resp_headers["Content-Range"] = f"bytes {start}-{end}/{total_size}"
 
-    return Response(stream_with_context(generate()),
-                    status=upstream.status_code,
-                    headers=resp_headers)
+    return Response(
+        stream_with_context(generate(upstream, start, end)),
+        status=206 if wants_range else 200,
+        headers=resp_headers,
+    )
 
 
 # ── Telegram screenshot relay ─────────────────────────────────────────────
