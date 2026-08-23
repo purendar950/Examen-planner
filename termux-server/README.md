@@ -277,11 +277,40 @@ cp ~/examzen-ubuntu-*.tar.gz ~/storage/downloads/
 cp ~/examzen-ubuntu-*.secrets.tar.gpg ~/storage/downloads/
 ```
 
-Keep the encrypted `.secrets.tar.gpg` file in a private Drive folder. The large
-`.tar.gz` dependency snapshot contains no credentials and is safe to store or
-share separately.
+Keep the encrypted `.secrets.tar.gpg` file in a private Drive folder for the
+normal restore workflow. The large `.tar.gz` dependency snapshot contains no
+ExamZen credentials and is safe to share separately. The optional one-link
+streaming mode below intentionally makes both files link-accessible; anyone who
+obtains that URL can attempt offline password guesses against the encrypted
+companion, so its password becomes the sole protection.
 
-### On a new Android device
+### Restore directly from a public Google Drive link (no duplicate 1.5 GB file)
+
+For a storage-constrained new phone, set the Drive folder's **General access**
+to **Anyone with the link — Viewer**. Then run this in fresh Termux:
+
+```sh
+pkg install -y curl
+curl -fsSL https://raw.githubusercontent.com/purendar950/Examen-planner/main/termux-server/restore-from-drive.sh \
+  -o ~/restore-from-drive.sh
+chmod +x ~/restore-from-drive.sh
+~/restore-from-drive.sh 'https://drive.google.com/drive/folders/YOUR_FOLDER_ID'
+```
+
+The helper installs only the small Termux-side tools, finds exactly one
+`.tar.gz` and one `.secrets.tar.gpg` in the linked folder, and downloads the
+small encrypted companion into a private temporary directory. It streams the
+large snapshot directly from Drive into `proot-distro restore`, so the phone
+does not keep a second 1.5 GB archive. The bytes still cross the network once;
+a container cannot be restored without reading them. Later server starts use
+the restored local Ubuntu container and do **not** contact Drive again.
+
+Streaming is one-pass and cannot resume. Keep Termux open. If the connection
+fails, remove the partial container with `proot-distro remove ubuntu` and run
+the same helper command again. The password is checked before the large stream
+is consumed.
+
+### Restore from files already downloaded to a new Android device
 
 Download both Drive files to the phone's Downloads folder, open Termux, and run:
 

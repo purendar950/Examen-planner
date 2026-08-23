@@ -10,6 +10,10 @@
 #   ./restore.sh ~/examzen-ubuntu-20260823.tar.gz \
 #     ~/examzen-ubuntu-20260823.secrets.tar.gpg
 #
+# Or stream the large snapshot without saving a duplicate file:
+#
+#   snapshot-downloader | ./restore.sh - ~/examzen-ubuntu-20260823.secrets.tar.gpg
+#
 # The snapshot deliberately carries NO secrets. When its encrypted credentials
 # companion is supplied, this script restores both required files and fixes all
 # directory/file permissions automatically.
@@ -24,7 +28,7 @@ say()  { printf '\n\033[1;36m▶ %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m  ✔ %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m  ⚠ %s\033[0m\n' "$*"; }
 die()  { printf '\033[1;31m✖ %s\033[0m\n' "$*" >&2; exit 1; }
-usage() { printf 'Usage: %s <snapshot.tar.gz> [encrypted-secrets.tar.gpg]\n' "${0##*/}"; }
+usage() { printf 'Usage: %s <snapshot.tar.gz|-> [encrypted-secrets.tar.gpg]\n' "${0##*/}"; }
 
 if [ "${1:-}" = -h ] || [ "${1:-}" = --help ]; then usage; exit 0; fi
 [ "$#" -le 2 ] || die "Too many arguments. Run ${0##*/} --help"
@@ -33,7 +37,11 @@ case "${2:-}" in --*) die "Unknown option: $2. Run ${0##*/} --help" ;; esac
 
 [ -n "${TERMUX_VERSION:-}" ] || die "Run this in Termux, not inside a container."
 [ -n "$TARBALL" ] || { usage >&2; exit 1; }
-[ -f "$TARBALL" ] || die "No such file: $TARBALL"
+if [ "$TARBALL" = - ]; then
+  [ ! -t 0 ] || die "Snapshot '-' means standard input, but no stream was provided."
+else
+  [ -f "$TARBALL" ] || die "No such file: $TARBALL"
+fi
 if [ -n "$SECRETS_BUNDLE" ]; then
   [ -f "$SECRETS_BUNDLE" ] || die "No such encrypted secrets file: $SECRETS_BUNDLE"
   command -v gpg >/dev/null || die "gpg is required to restore encrypted secrets. Run: pkg install -y gnupg"
@@ -69,8 +77,14 @@ if [ -n "$SECRETS_BUNDLE" ]; then
   ok "encrypted credentials password accepted"
 fi
 
-say "Restoring $DISTRO from $(du -h "$TARBALL" | cut -f1) snapshot"
-proot-distro restore "$TARBALL" || die "proot-distro restore failed."
+if [ "$TARBALL" = - ]; then
+  say "Restoring $DISTRO directly from the snapshot stream (no duplicate archive is saved)"
+  proot-distro restore \
+    || die "Streamed restore failed. The download may have stopped early. Remove any partial container with: proot-distro remove $DISTRO"
+else
+  say "Restoring $DISTRO from $(du -h "$TARBALL" | cut -f1) snapshot"
+  proot-distro restore "$TARBALL" || die "proot-distro restore failed."
+fi
 
 proot-distro login "$DISTRO" -- true >/dev/null 2>&1 \
   || die "Restored, but the container will not start. Try: proot-distro list"
