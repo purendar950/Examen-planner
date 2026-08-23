@@ -123,6 +123,7 @@ def fetch_transcript(url_or_id, lang="auto"):
             opts = {
                 "quiet": True, "no_warnings": True, "skip_download": True,
                 "noplaylist": True,
+                "format": "worst",  # Avoid "format not available" errors when extracting captions
                 "extractor_args": {"youtube": {"player_client": [client]}},
             }
             with YoutubeDL(opts) as ydl:
