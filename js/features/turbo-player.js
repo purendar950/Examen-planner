@@ -22,24 +22,41 @@
 (function () {
   'use strict';
 
-  /* The Render backend that serves Turbo, and the ONLY server Turbo talks to.
-     Override at runtime with:
-       localStorage.setItem('turboBackendUrl', 'https://your-service.onrender.com')
+  /* ── Which server streams Turbo ──────────────────────────────────────────
+     Turbo picks its own server and does NOT use PrepPathBackend's routing
+     policy (js/core/backend-router.js), for two reasons:
 
-     Turbo deliberately does NOT resolve its server through PrepPathBackend
-     (js/core/backend-router.js). That registry lives in Firestore config/turbo
-     and is shared with the AI/transcript routes, so anything published into it
-     — in particular the `termux-quick-tunnel` entry that termux-server/
-     quick-tunnel.py upserts for a phone-hosted server — silently became Turbo's
-     media server too. When that phone was asleep, offline, or its Cloudflare
-     Quick Tunnel had rotated, Turbo took the whole registry's failure with it:
-     the byte stream is opened by the browser as <video src>, so a wrong or dead
-     host surfaces only as an opaque media error.
+       1. That policy is shared with the AI/transcript routes, so an Admin
+          choosing an AI server silently re-pointed video too.
+       2. Every byte of video flows through whichever server is chosen, and
+          hosts differ by three orders of magnitude in what that costs. A
+          self-hosted box on home broadband is effectively unmetered; Render's
+          Hobby plan includes 5 GB/month, which is ~26 hours of 360p for ALL
+          users combined. Video must therefore prefer self-hosted and treat
+          Render as a last resort, while AI generation (a few KB of JSON per
+          request) has no reason to care.
 
-     Pinning here keeps playback on the Render service that render-keepalive.yml
-     keeps warm, and makes /api/info and /api/stream provably hit the SAME host
-     (googlevideo format URLs are IP-locked to whichever server extracted them,
-     which is why the old code had to ask the router for response affinity). */
+     The registry is still used, but as a LIST OF CANDIDATES rather than as a
+     policy — that is what keeps a phone working: termux-server/quick-tunnel.py
+     republishes the phone's Cloudflare Quick Tunnel URL there every time it
+     rotates, so Turbo follows the phone automatically without anyone editing a
+     setting. Candidates are health-probed in order and the first live one
+     serves BOTH /api/info and /api/stream, because a googlevideo format URL is
+     signed with the extracting server's IP inside `sparams` — a different host
+     cannot replay it.
+
+     Per-device override (always tried first):
+       localStorage.setItem('turboBackendUrl', 'https://my-box.example.com') */
+  var TURBO_RENDER_URL = 'https://youtube-turbo-proxy-new.onrender.com';
+  // How long a candidate gets to answer /health before Turbo moves on. Short:
+  // this is a liveness check, not the extraction, and a sleeping phone must not
+  // cost the student the whole 95s budget before Render is tried.
+  var TURBO_HEALTH_TIMEOUT_MS = 6000;
+  // Re-probing on every load would add a round trip to each video; caching the
+  // winner for a couple of minutes keeps playlists snappy while still noticing
+  // a phone that dropped out mid-session.
+  var TURBO_SERVER_TTL_MS = 120000;
+  var turboServerPick = { url: '', at: 0 };
   var configuredTurboBackendUrl = localStorage.getItem('turboBackendUrl') || '';
   if (/^https:\/\/youtube-turbo-proxy(?:-gej4)?\.onrender\.com\/?$/i.test(configuredTurboBackendUrl)) {
     configuredTurboBackendUrl = 'https://youtube-turbo-proxy-new.onrender.com';
@@ -49,17 +66,104 @@
   if (/^https:\/\/youtube-turbo-new\.onrender\.com\/?$/i.test(configuredTurboBackendUrl)) {
     configuredTurboBackendUrl = 'https://youtube-turbo-proxy-new.onrender.com';
   }
-  var TURBO_BACKEND_URL = (configuredTurboBackendUrl
-    || 'https://youtube-turbo-proxy-new.onrender.com').replace(/\/+$/, '');
+  var TURBO_BACKEND_URL = (configuredTurboBackendUrl || TURBO_RENDER_URL).replace(/\/+$/, '');
 
   /* Where the Turbo screenshot is POSTed. It goes to the SAME backend that
      streams the video (the proxy exposes /send-photo, which relays to Telegram
-     server-side using the token from Firestore). Reusing TURBO_BACKEND_URL
+     server-side using the token from Firestore). Reusing the Turbo server
      means there's no separate bot URL to configure — if video plays, sending
      works. Override only if you host the relay elsewhere:
        localStorage.setItem('telegramBotUrl','https://your-relay.onrender.com') */
   var TELEGRAM_BOT_URL = (localStorage.getItem('telegramBotUrl')
     || TURBO_BACKEND_URL).replace(/\/+$/, '');
+
+  /* Candidate Turbo servers, most-preferred first. Render is always last: it is
+     correct but bandwidth-capped, so it should only carry video when nothing
+     self-hosted is up. */
+  function turboServerCandidates() {
+    var out = [];
+    function add(value) {
+      var url = String(value || '').replace(/\/+$/, '');
+      if (!url) return;
+      // An https page cannot fetch an http:// backend (mixed content), and a
+      // LAN address like http://192.168.1.5:8080 is a common thing to find in
+      // the registry. Drop it here rather than failing opaquely later.
+      try {
+        if (window.location.protocol === 'https:' && /^http:\/\//i.test(url)) return;
+      } catch (e) {}
+      if (out.indexOf(url) === -1) out.push(url);
+    }
+    function isRender(url) {
+      return /^https:\/\/youtube-turbo(?:-proxy)?(?:-new|-gej4)?\.onrender\.com$/i.test(url);
+    }
+    add(configuredTurboBackendUrl);
+    try {
+      var snapshot = window.PrepPathBackend && typeof window.PrepPathBackend.getConfig === 'function'
+        ? window.PrepPathBackend.getConfig() : null;
+      var servers = (snapshot && snapshot.servers) || [];
+      // Self-hosted entries first (the phone tunnel lives here); Render is
+      // appended afterwards so registry order cannot promote it.
+      servers.forEach(function (server) {
+        if (server && server.enabled !== false && !isRender(String(server.url || '').replace(/\/+$/, ''))) add(server.url);
+      });
+    } catch (e) {}
+    add(TURBO_RENDER_URL);
+    return out;
+  }
+
+  function turboServerIsLive(base, signal) {
+    return new Promise(function (resolve) {
+      var settled = false;
+      var probe = new AbortController();
+      var timer = setTimeout(function () { if (!settled) { settled = true; try { probe.abort(); } catch (e) {} resolve(false); } }, TURBO_HEALTH_TIMEOUT_MS);
+      function done(ok) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(ok);
+      }
+      if (signal) {
+        if (signal.aborted) { done(false); return; }
+        signal.addEventListener('abort', function () { try { probe.abort(); } catch (e) {} done(false); });
+      }
+      window.fetch(base + '/health', { method: 'GET', cache: 'no-store', signal: probe.signal })
+        .then(function (r) { done(!!r && r.ok); })
+        .catch(function () { done(false); });
+    });
+  }
+
+  /* Resolve the server to use for this load. Falls back through every candidate
+     and only rejects when none answer, so the caller can drop to the iframe. */
+  function turboPickServer(signal) {
+    var now = Date.now();
+    if (turboServerPick.url && (now - turboServerPick.at) < TURBO_SERVER_TTL_MS) {
+      return Promise.resolve(turboServerPick.url);
+    }
+    var candidates = turboServerCandidates();
+    return new Promise(function (resolve, reject) {
+      (function attempt(index) {
+        if (signal && signal.aborted) { reject(new Error('cancelled')); return; }
+        if (index >= candidates.length) {
+          reject(new Error('No Turbo server is reachable. Start your self-hosted server, or check Admin → Backend servers.'));
+          return;
+        }
+        var base = candidates[index];
+        turboServerIsLive(base, signal).then(function (live) {
+          if (live) {
+            turboServerPick = { url: base, at: Date.now() };
+            resolve(base);
+            return;
+          }
+          attempt(index + 1);
+        });
+      })(0);
+    });
+  }
+
+  function turboServerLabel(base) {
+    if (!base) return 'media server';
+    return /onrender\.com$/i.test(base) ? 'Render (bandwidth-capped)' : 'self-hosted server';
+  }
 
   // Turbo is OFF by default on every page load (session-only toggle).
   // The design doc says: "Default player = the original YouTube iframe.
@@ -487,10 +591,10 @@
     var iframeEl = document.getElementById('yt-player');
     if (iframeEl) iframeEl.style.display = 'block';
     showBadge(false);
-    // This phase covers routing-policy sync plus metadata extraction, so it is
+    // This phase covers server selection plus metadata extraction, so it is
     // not evidence that a server is asleep. Keep a realistic expectation: a
     // cold Render instance and a first extraction can each take a while.
-    status('⚡ Turbo: contacting media server and reading video info… (up to ~60s on a cold server)');
+    status('⚡ Turbo: finding a media server… (up to ~60s on a cold server)');
 
     var ctrl = new AbortController();
     turboLoadController = ctrl;
@@ -498,26 +602,37 @@
     emitTurboState();
     var timer = setTimeout(function () { if (seq === turboLoadSeq) ctrl.abort(); }, 95000);
 
-    /* Straight at the pinned Turbo server. The 95s budget is already enforced
-       by the abort timer above, so no router timeout is needed, and /api/info
-       takes no auth (see youtube-turbo-proxy/app.py). */
-    var infoUrl = TURBO_BACKEND_URL + '/api/info?id=' + encodeURIComponent(id);
-    fetch(infoUrl, { signal: ctrl.signal })
-      .then(function (r) {
-        return r.json().then(function (d) { return { ok: r.ok, d: d }; });
+    /* Pick a live server, then talk to it directly. The 95s budget is already
+       enforced by the abort timer above, so no router timeout is needed, and
+       /api/info takes no auth (see youtube-turbo-proxy/app.py). */
+    var turboBase = '';
+    turboPickServer(ctrl.signal)
+      .then(function (base) {
+        turboBase = base;
+        if (seq !== turboLoadSeq) return { ok: false, d: null, skip: true };
+        status('⚡ Turbo: reading video info from your ' + turboServerLabel(base) + '…');
+        return fetch(base + '/api/info?id=' + encodeURIComponent(id), { signal: ctrl.signal })
+          .then(function (r) {
+            return r.json().then(function (d) { return { ok: r.ok, d: d }; });
+          });
       })
       .then(function (res) {
         clearTimeout(timer);
+        if (res && res.skip) return;
         if (seq !== turboLoadSeq || !turboPendingLoad || turboPendingLoad.seq !== seq) return;
         if (!res.ok || !res.d || !res.d.formats || !res.d.formats.length) {
+          // This server answered but cannot serve the video. Re-probe on the
+          // next load rather than pinning a server that just failed.
+          turboServerPick = { url: '', at: 0 };
           throw new Error((res.d && (res.d.detail || res.d.error)) || 'no stream');
         }
         turboVidTitle = (res.d && res.d.title) || turboVidTitle;
         var f = res.d.formats[0];              // highest single-file quality
         var current = (typeof ytSpeedCurrent !== 'undefined') ? ytSpeedCurrent : 1;
-        // Same pinned host that just answered /api/info, so the extraction and
-        // the byte stream always share one server (and one IP).
-        var streamUrl = TURBO_BACKEND_URL + '/api/stream?id=' + encodeURIComponent(id) + '&itag=' + encodeURIComponent(f.itag);
+        // The SAME host that just answered /api/info: a googlevideo format URL
+        // is signed with the extracting server's IP (ip= is inside sparams), so
+        // no other host can replay it.
+        var streamUrl = turboBase + '/api/stream?id=' + encodeURIComponent(id) + '&itag=' + encodeURIComponent(f.itag);
         // Each asynchronous load owns a fresh media element. Event closures now
         // carry immutable seq/id/source identity, so an old queued media event
         // cannot observe mutable state from—and corrupt—a newer request.
@@ -719,12 +834,14 @@
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify({ imageBase64: base64, caption: caption })
       };
-      // Same pinned server as playback. The screenshot is a Turbo action, so it
-      // must not depend on the shared media registry either — a Turbo session
-      // that plays fine should never fail to send because the registry points
-      // somewhere else. TELEGRAM_BOT_URL defaults to TURBO_BACKEND_URL and
-      // still honours the telegramBotUrl override for a self-hosted relay.
-      return fetch(TELEGRAM_BOT_URL + '/send-photo', requestOptions);
+      // The server that is currently streaming this video also exposes
+      // /send-photo, so a Turbo session that plays can always send. Falls back
+      // to the configured relay when no server has been picked yet, and an
+      // explicit telegramBotUrl override still wins.
+      var relayBase = localStorage.getItem('telegramBotUrl')
+        ? TELEGRAM_BOT_URL
+        : (turboServerPick.url || TELEGRAM_BOT_URL);
+      return fetch(relayBase + '/send-photo', requestOptions);
     })
       .then(function (r) { return r.json().catch(function () { return { ok: r.ok }; }); })
       .then(function (res) {
