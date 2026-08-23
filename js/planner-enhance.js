@@ -83,9 +83,12 @@ function openStudyProfileModal(startStep) {
 
   /* Step 3 — schedule fields */
   const sh = document.getElementById('sp-start-hour');
-  const rd = document.getElementById('sp-rest-day');
+  const legacyRestDay = Number.isInteger(Number(p.restDay)) ? Number(p.restDay) : -1;
+  const savedRestDays = Array.isArray(p.restDays) ? p.restDays : (legacyRestDay >= 0 ? [legacyRestDay] : []);
+  document.querySelectorAll('.sp-rest-check').forEach(box => {
+    box.checked = savedRestDays.includes(Number(box.value));
+  });
   if (sh) sh.value = p.startHour || 6;
-  if (rd) rd.value = p.restDay !== undefined ? p.restDay : 0;
 
   /* Step 3 — weak subject checkboxes (depend on active exam) */
   const subsBox = document.getElementById('sp-sub-checkboxes');
@@ -239,7 +242,8 @@ function saveStudyProfile() {
   const startHour    = parseInt(document.getElementById('sp-start-hour')?.value) || 6;
   const morningHours = parseFloat(document.getElementById('sp-morning-hours')?.value) || Math.ceil(dailyHours / 2);
   const eveningHours = parseFloat(document.getElementById('sp-evening-hours')?.value) || Math.floor(dailyHours / 2);
-  const restDay      = parseInt(document.getElementById('sp-rest-day')?.value);
+  const restDays     = [...document.querySelectorAll('.sp-rest-check:checked')].map(box => Number(box.value));
+  const restDay      = restDays.length ? restDays[0] : -1;
   const weakSubjects = [...(document.querySelectorAll('.sp-sub-check:checked') || [])].map(cb => cb.value);
 
   /* Apply chosen exam to the app */
@@ -251,7 +255,7 @@ function saveStudyProfile() {
 
   appState.studyProfile = {
     examTarget, targetYear, prepLevel, prepMode, targetScore,
-    dailyHours, startHour, morningHours, eveningHours, restDay, weakSubjects,
+    dailyHours, startHour, morningHours, eveningHours, restDays, restDay, weakSubjects,
     setupDone: true
   };
   saveProgress();
@@ -448,7 +452,9 @@ function generateWeeklyPlan() {
   const daysLeft  = getDaysLeft();
   const phase     = getPreparationPhase(daysLeft);
   const profile   = appState.studyProfile || {};
-  const restDay   = profile.restDay !== undefined ? Number(profile.restDay) : -1;
+  const legacyRestDay = Number.isInteger(Number(profile.restDay)) ? Number(profile.restDay) : -1;
+  const restDays  = (Array.isArray(profile.restDays) ? profile.restDays : (legacyRestDay >= 0 ? [legacyRestDay] : []))
+    .map(Number).filter(day => day >= 0 && day <= 6);
   const today     = new Date(); today.setHours(0,0,0,0);
 
   /* Single source of truth: the same schedule map the Today tab renders from.
@@ -474,7 +480,7 @@ function generateWeeklyPlan() {
     const dateStr = date.toLocaleDateString('en-IN', { day:'numeric', month:'short' });
 
     /* Rest day (same rule buildPlanSchedule uses — no topics are placed here) */
-    if (restDay >= 0 && dow === restDay) {
+    if (restDays.includes(dow)) {
       days.push({ label, dateStr, dow, type:'rest' }); continue;
     }
 

@@ -787,6 +787,7 @@ function pwBuildSyllabusConfig() {
   cfg.chapters   = JSON.parse(JSON.stringify(PW_STATE.syllabus.chapters || {}));
   cfg.subjectFreq = JSON.parse(JSON.stringify(PW_STATE.syllabus.subjectFreq || {}));
   cfg.subjectHours = JSON.parse(JSON.stringify(PW_STATE.syllabus.subjectHours || {}));
+  cfg.restDays = planRestDays(cfg);
   /* Effort budget: 2 points ≈ one medium topic ≈ roughly one hour. */
   cfg.dailyTopicPoints = Math.max(2, Math.round((Number(cfg.dailyHours) || 4) * 2));
   if (PW_STATE.type === 'single') {
@@ -794,6 +795,18 @@ function pwBuildSyllabusConfig() {
     cfg.topicsPerDay = Math.max(1, parseInt(PW_STATE.syllabus.topicsPerDay, 10) || 1);
   }
   return cfg;
+}
+
+function pwCountWorkDays(startDate, endDate, restDays = []) {
+  const start = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
+  if (!startDate || !endDate || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return 0;
+  const restSet = new Set(restDays.map(Number).filter(day => Number.isInteger(day) && day >= 0 && day <= 6));
+  let count = 0;
+  for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
+    if (!restSet.has(date.getDay())) count += 1;
+  }
+  return count;
 }
 
 function pwPreviewSyllabusPlan(cfg) {
@@ -808,6 +821,10 @@ function pwPreviewSyllabusPlan(cfg) {
   const workDays = days.filter(day => day.count > 0);
   const totalUnits = workDays.reduce((sum, day) => sum + day.count, 0);
   const totalPoints = workDays.reduce((sum, day) => sum + day.points, 0);
+  const availableDays = pwCountWorkDays(schedule.startDate, cfg.endDate, cfg.restDays || []);
+  const requiredDailyPoints = availableDays ? Math.ceil(totalPoints / availableDays) : 0;
+  const requiredDailyHours = Math.ceil((requiredDailyPoints / 2) * 2) / 2;
+  const deadlinePace = { availableDays, requiredDailyPoints, requiredDailyHours };
   const maxLoad = workDays.reduce((max, day) => Math.max(max, day.points), 0);
   const overloadedDays = days.filter(day => day.points > cfg.dailyTopicPoints).length;
   const warnings = [];
@@ -820,6 +837,9 @@ function pwPreviewSyllabusPlan(cfg) {
   if (overloadedDays) {
     warnings.push({ tone:'warn', text:`${overloadedDays} day${overloadedDays === 1 ? '' : 's'} exceed the ${cfg.dailyTopicPoints}-point daily budget.` });
   }
+  if (availableDays && requiredDailyPoints > cfg.dailyTopicPoints) {
+    warnings.push({ tone:'danger', text:`Deadline needs ${requiredDailyPoints} pt/day (~${requiredDailyHours}h). Increase daily hours or remove rest days.` });
+  }
   return {
     ...schedule,
     previewDays: days,
@@ -830,6 +850,7 @@ function pwPreviewSyllabusPlan(cfg) {
     maxLoad,
     dailyBudget: cfg.dailyTopicPoints,
     overloadedDays,
+    deadlinePace,
     warnings
   };
 }
@@ -864,6 +885,11 @@ function pwRenderPlanPreview(preview) {
           <div style="font-size:.58rem;color:var(--muted);">Peak / budget</div>
           <div style="font-size:.85rem;font-weight:800;color:${preview.overloadedDays ? '#f59e0b' : 'var(--text)'};">${preview.maxLoad} / ${preview.dailyBudget}</div>
         </div>
+      </div>
+      <div style="margin-top:6px;padding:.45rem .6rem;border-radius:8px;font-size:.68rem;line-height:1.35;background:var(--card);border:1px solid var(--border);color:var(--muted);">
+        Deadline capacity: <strong style="color:var(--text);">${preview.deadlinePace.availableDays} days</strong>
+        · Required pace: <strong style="color:${preview.deadlinePace.requiredDailyPoints > preview.dailyBudget ? '#ef4444' : 'var(--text)'};">${preview.deadlinePace.requiredDailyPoints} pt/day</strong>
+        (~${preview.deadlinePace.requiredDailyHours}h)
       </div>
       ${warningHtml}
     </div>`;

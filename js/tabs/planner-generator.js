@@ -56,6 +56,24 @@ function effectiveTopicPoints(topic, chapter) {
   return TOPIC_POINTS[effectiveTopicSize(topic, chapter)] || 2;
 }
 
+/* Rest days are stored as weekday numbers. Older profiles keep one restDay,
+   while newer profiles use restDays without losing the legacy value. */
+function planRestDays(cfg) {
+  const profile = appState.studyProfile || {};
+  const configured = (cfg && Array.isArray(cfg.restDays))
+    ? cfg.restDays
+    : (Array.isArray(profile.restDays) ? profile.restDays : []);
+  return [...new Set(
+    configured.concat(profile.restDay != null ? [profile.restDay] : [])
+      .map(Number)
+      .filter(day => Number.isInteger(day) && day >= 0 && day <= 6)
+  )].sort((a, b) => a - b);
+}
+
+function dateIsRestDay(date, cfg) {
+  return planRestDays(cfg).includes(new Date(date).getDay());
+}
+
 /* ---------------------------------------------------------------------------
    buildPlanSchedule(cfg) — core day-by-day topic schedule.
    Subjects run IN PARALLEL by their frequency (subjectFreq: 1=daily,
@@ -72,7 +90,7 @@ function buildPlanSchedule(cfg, planId) {
   const chConf   = cfg.chapters || {};
   const freqOf   = id => Math.max(1, (cfg.subjectFreq && cfg.subjectFreq[id]) || 1);
   const profile  = appState.studyProfile || {};
-  const restDay  = (profile.restDay !== undefined) ? Number(profile.restDay) : -1;
+  const restDays = planRestDays(cfg);
   /* Single Subject plans are chapter-based: each chapter is one whole topic and
      we place `perDay` of them per day (no Days/Gap splitting). */
   const isSingle = !!cfg.scopeSubId;
@@ -194,8 +212,8 @@ function buildPlanSchedule(cfg, planId) {
     guard++;
     const d = new Date(startD); d.setDate(startD.getDate() + dayIdx);
     const dateStr = fmtDate(d);
-    /* Skip the weekly rest day entirely (no topics placed, no slot consumed). */
-    if (restDay >= 0 && d.getDay() === restDay) { dayIdx++; continue; }
+    /* Skip configured rest days entirely (no topics placed, no slot consumed). */
+    if (restDays.includes(d.getDay())) { dayIdx++; continue; }
     const dayItems = [];
     /* Every subject whose turn is today contributes its current slot(s). */
     for (const s of perSubject) {
@@ -339,26 +357,22 @@ function toggleWeightedTopicDone(chId, topicId) {
 --------------------------------------------------------------------------- */
 /* ---------------------------------------------------------------------------
    isRestDayToday() / renderRestDayNotice(container) — shared rest-day guard.
-   The user's weekly rest day (studyProfile.restDay) must be honoured by EVERY
+   The user's rest days (studyProfile.restDays or legacy restDay) are honoured by every
    plan type. renderRestDayNotice renders the "Rest Day" card into `container`
-   and returns true when today is the rest day, so each renderer can simply do:
+   and returns true when today is a rest day, so each renderer can simply do:
      if (renderRestDayNotice(container)) return;
    Keeping this in one place stops Syllabus / Practice / Mock from drifting
    apart (Practice & Mock previously had no guard and studied on rest days).
 --------------------------------------------------------------------------- */
 function isRestDayToday() {
-  const profile = appState.studyProfile || {};
-  const restDay = (profile.restDay !== undefined) ? Number(profile.restDay) : -1;
-  return restDay >= 0 && new Date().getDay() === restDay;
+  return planRestDays().includes(new Date().getDay());
 }
 function renderRestDayNotice(container) {
   if (!container || !isRestDayToday()) return false;
-  const restDay = Number((appState.studyProfile || {}).restDay);
-  const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][restDay];
   container.innerHTML = `<div style="padding:2.5rem;text-align:center;">
     <div style="font-size:2.5rem;margin-bottom:10px;">😴</div>
     <div style="font-size:1rem;font-weight:700;color:var(--accent);">Rest Day!</div>
-    <div style="font-size:.82rem;color:var(--muted);margin-top:6px;">Aaj ${dayName} hai — scheduled rest day. Kal wapas aao 💪</div>
+    <div style="font-size:.82rem;color:var(--muted);margin-top:6px;">Aaj scheduled rest day hai. Kal wapas aao 💪</div>
   </div>`;
   return true;
 }
