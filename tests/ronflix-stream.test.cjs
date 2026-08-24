@@ -25,7 +25,15 @@ const context = {
   fetch: async (url) => {
     requests.push(url);
     call += 1;
-    if (call === 1) throw new Error('first mirror unavailable');
+    if (call === 1) {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { error: 'YouTube probably temporarily blocked anonymous watch access' };
+        },
+      };
+    }
     return {
       ok: true,
       status: 200,

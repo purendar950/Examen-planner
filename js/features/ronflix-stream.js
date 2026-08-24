@@ -64,6 +64,9 @@
       chain = chain.catch(function () {
         if (opts.signal && opts.signal.aborted) throw new DOMException('Aborted', 'AbortError');
         return fetchJson(candidate + withQuery(path, params), opts).then(function (data) {
+          if (/^\/streams\//.test(path) && (!data || data.error || !Array.isArray(data.videoStreams))) {
+            throw new Error(data && data.error ? 'mirror blocked playback' : 'no stream list returned');
+          }
           base = candidate;
           try { localStorage.setItem(STORAGE_KEY, candidate); } catch (e) {}
           return data;
