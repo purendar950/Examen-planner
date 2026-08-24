@@ -811,6 +811,35 @@ test('Enter dispatches exactly once while Shift+Enter keeps a new line', () => {
   fixture.dom.window.close();
 });
 
+test('the visible Stop control invokes generation cancellation without sending again', () => {
+  let stops = 0;
+  let sends = 0;
+  const fixture = loadComposerBinding(() => { sends += 1; });
+  fixture.context.window.aicStopGeneration = () => { stops += 1; };
+  const stop = fixture.page.querySelector('#aic-stop-btn');
+  assert.equal(stop.type, 'button');
+  stop.click();
+  assert.equal(stops, 1);
+  assert.equal(sends, 0);
+  fixture.dom.window.close();
+});
+
+test('Ctrl/Cmd+K activates the advertised New chat shortcut', () => {
+  const start = source.indexOf('window.aicKeydown = function (ev) {');
+  const end = source.indexOf('/* ── sending: streams via SSE', start);
+  assert.ok(start !== -1 && end > start, 'could not locate AI Chat keyboard handler');
+  const context = { window: {}, document: {} };
+  vm.createContext(context);
+  vm.runInContext(source.slice(start, end), context);
+  context.window.aicNewThread = () => { context.created = true; };
+  context.window.aicKeydown({
+    key: 'k', ctrlKey: true, metaKey: false, shiftKey: false,
+    preventDefault: () => { context.prevented = true; }
+  });
+  assert.equal(context.created, true);
+  assert.equal(context.prevented, true);
+});
+
 test('a form submit dispatches exactly once and is prevented', () => {
   let calls = 0;
   const fixture = loadComposerBinding(() => { calls += 1; });

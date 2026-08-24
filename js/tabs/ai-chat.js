@@ -47,6 +47,9 @@
   var _accessRetryCount = 0;
   var _accessRequestInFlight = false;
   var _sending = false;
+  var _chatAbort = null;
+  var _generationStopped = false;
+  var _chatOperation = '';
   // Only one optional tool panel may be open at a time. The active panel is
   // moved into the universal composer instead of rendering as a separate page-wide box.
   var _activeComposerTool = '';
@@ -69,6 +72,7 @@
   var _threadPersistTimer = null;
   var _threadPersistChain = Promise.resolve();
   var _aiStorageService = null;
+  var _logStuck = true;
   // A pending image request cannot survive a full page refresh. Live requests
   // are protected by _activeImageRequests; anything else is recoverable via retry.
   var DIRECT_IMAGE_TOTAL_TIMEOUT_MS = 240 * 1000;
@@ -354,7 +358,7 @@
     .aic-thread:hover .aic-thread-del,.aic-thread.active .aic-thread-del{opacity:.62;}
     .aic-thread-del:hover{opacity:1!important;color:#c54b43;}
     .aic-side-note{margin:0 1rem 1rem;padding:.7rem .75rem;border:1px solid color-mix(in srgb,var(--border) 65%,transparent);border-radius:11px;color:var(--muted);font-size:.68rem;line-height:1.45;background:color-mix(in srgb,var(--card) 62%,transparent);}
-    .aic-main{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--card);}
+    .aic-main{position:relative;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--card);}
     .aic-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;min-height:52px;padding:.62rem clamp(1rem,4vw,2rem);border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent);background:color-mix(in srgb,var(--card) 92%,var(--surface));}
     .aic-head-left{display:flex;align-items:center;gap:11px;min-width:0;}
     .aic-head h2{overflow:hidden;margin:0;color:var(--text);font-size:.98rem;font-weight:750;letter-spacing:-.02em;text-overflow:ellipsis;white-space:nowrap;}
@@ -370,7 +374,9 @@
     .aic-chip-btn:active,.aic-icon-btn:active{transform:scale(.97);}
     .aic-chip-btn.is-on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--text);}
     .aic-quick-spacer{flex:1;}
-    .aic-log{flex:1;min-height:0;overflow-y:auto;width:100%;max-width:none;margin:0;padding:1.1rem clamp(1rem,6vw,5rem) 2rem;scrollbar-width:thin;}
+    .aic-log{flex:1;min-height:0;overflow-y:auto;width:100%;max-width:none;margin:0;padding:1.1rem clamp(1rem,6vw,5rem) 2rem;scrollbar-width:thin;scroll-behavior:smooth;}
+    .aic-jump-latest{position:absolute;right:clamp(1rem,4vw,2.5rem);bottom:.8rem;z-index:3;display:inline-flex;align-items:center;gap:5px;padding:7px 10px;border:1px solid color-mix(in srgb,var(--border) 90%,transparent);border-radius:999px;background:color-mix(in srgb,var(--surface) 94%,var(--card));color:var(--text);font:inherit;font-size:.7rem;font-weight:750;box-shadow:0 7px 18px rgba(28,24,20,.12);cursor:pointer;}
+    .aic-jump-latest:hover{border-color:var(--accent);}
     .aic-msg-row{display:flex;flex-direction:column;width:min(100%,920px);margin:0 auto .85rem;gap:4px;animation:aic-rise .18s ease-out both;}
     .aic-msg-row + .aic-msg-row{margin-top:.1rem;}
     .aic-msg-row.user{align-items:flex-end;}
@@ -535,6 +541,8 @@
     .aic-hint{flex:1;color:var(--muted);font-size:.64rem;}
     .aic-send{display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:32px;padding:0 11px;border:0;border-radius:9px;background:var(--accent);color:#17130e;font-size:.78rem;font-weight:800;cursor:pointer;transition:transform .16s ease-out,opacity .16s ease-out;}
     .aic-send:hover{transform:translateY(-1px);}.aic-send:active{transform:scale(.97);}.aic-send:disabled{opacity:.5;cursor:default;transform:none;}
+    .aic-stop{display:inline-flex;align-items:center;justify-content:center;height:32px;padding:0 11px;border:1px solid rgba(197,75,67,.45);border-radius:9px;background:rgba(197,75,67,.08);color:#c54b43;font:inherit;font-size:.76rem;font-weight:800;cursor:pointer;}
+    .aic-stop:hover{background:rgba(197,75,67,.13);}.aic-stop[hidden]{display:none;}
     .aic-file-input{display:none;}
     .aic-persona-box,.aic-image-box,.aic-github-box,.aic-media-box{padding:.8rem 1.25rem;border-bottom:1px solid color-mix(in srgb,var(--border) 65%,transparent);background:color-mix(in srgb,var(--surface) 70%,var(--card));}
     .aic-persona-label,.aic-image-label,.aic-github-label{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;color:var(--muted);font-size:.7rem;}
@@ -622,10 +630,11 @@
       <pre id="aic-workspace-output" data-workspace-area="output" class="aic-workspace-output"></pre>
       <div id="aic-workspace-preview" data-workspace-area="preview" class="aic-workspace-preview"><div class="aic-workspace-preview-label"><span>Live preview</span><span>Sandboxed local scripts</span></div><iframe id="aic-workspace-preview-frame" title="HTML, CSS, and JavaScript live preview" sandbox="allow-scripts"></iframe></div>
     </section>
-    <div class="aic-log" id="aic-log"></div>
+    <div class="aic-log" id="aic-log" role="log" aria-live="polite" aria-relevant="additions text" aria-label="AI Chat conversation"></div>
+    <button class="aic-jump-latest" id="aic-jump-latest" type="button" hidden onclick="aicScrollToLatest()">↓ Latest</button>
     <form class="aic-form">
       <input type="file" id="aic-file-input" class="aic-file-input" accept=".txt,.md,.pdf" onchange="aicFileSelected(event)">
-      <div class="aic-composer"><div class="aic-composer-toolbox" id="aic-composer-toolbox" aria-live="polite"></div><textarea class="aic-input" id="aic-input" rows="1" placeholder="Message AI Chat…"></textarea>      <div class="aic-composer-bottom"><div class="aic-composer-tools"><button type="button" class="aic-composer-tool" id="aic-attach-btn" onclick="document.getElementById('aic-file-input').click()" title="Attach a file" style="display:none;">＋ Attach</button><button type="button" class="aic-composer-tool" id="aic-composer-youtube-btn" onclick="aicToggleYoutubeBox()" title="Attach a YouTube video's transcript">▶ YouTube</button><button type="button" class="aic-composer-tool" onclick="aicToggleImageBox()" title="Generate an image">▧ Image</button><button type="button" class="aic-composer-tool" id="aic-composer-search-btn" onclick="aicToggleSearchBox()" title="Search the web" style="display:none;">⌕ Search</button><button type="button" class="aic-composer-tool" id="aic-composer-speech-btn" onclick="aicToggleSpeechBox()" title="Read text aloud" style="display:none;">♬ Speak</button><button type="button" class="aic-composer-tool" id="aic-composer-video-btn" onclick="aicToggleVideoBox()" title="Generate a video" style="display:none;">▣ Video</button></div><span class="aic-hint">Ask for an image, web search, spoken answer, or video anytime.</span><button class="aic-send" id="aic-send-btn" type="button" aria-label="Send message">↑ Send</button></div></div>
+      <div class="aic-composer"><div class="aic-composer-toolbox" id="aic-composer-toolbox" aria-live="polite"></div><textarea class="aic-input" id="aic-input" rows="1" placeholder="Message AI Chat…"></textarea>      <div class="aic-composer-bottom"><div class="aic-composer-tools"><button type="button" class="aic-composer-tool" id="aic-attach-btn" onclick="document.getElementById('aic-file-input').click()" title="Attach a file" style="display:none;">＋ Attach</button><button type="button" class="aic-composer-tool" id="aic-composer-youtube-btn" onclick="aicToggleYoutubeBox()" title="Attach a YouTube video's transcript">▶ YouTube</button><button type="button" class="aic-composer-tool" onclick="aicToggleImageBox()" title="Generate an image">▧ Image</button><button type="button" class="aic-composer-tool" id="aic-composer-search-btn" onclick="aicToggleSearchBox()" title="Search the web" style="display:none;">⌕ Search</button><button type="button" class="aic-composer-tool" id="aic-composer-speech-btn" onclick="aicToggleSpeechBox()" title="Read text aloud" style="display:none;">♬ Speak</button><button type="button" class="aic-composer-tool" id="aic-composer-video-btn" onclick="aicToggleVideoBox()" title="Generate a video" style="display:none;">▣ Video</button></div><span class="aic-hint">Ask for an image, web search, spoken answer, or video anytime.</span><button class="aic-stop" id="aic-stop-btn" type="button" hidden onclick="aicStopGeneration()">■ Stop</button><button class="aic-send" id="aic-send-btn" type="button" aria-label="Send message">↑ Send</button></div></div>
 
     </form>
   </main>
@@ -650,6 +659,8 @@
     if (!form || !input || !send || form.dataset.aicSubmissionBound === 'true') return false;
 
     form.dataset.aicSubmissionBound = 'true';
+    var stop = page.querySelector('#aic-stop-btn');
+    if (stop) stop.addEventListener('click', function () { if (typeof window.aicStopGeneration === 'function') window.aicStopGeneration(); });
     send.addEventListener('click', dispatchComposerSend);
     form.addEventListener('submit', dispatchComposerSend);
     input.addEventListener('keydown', function (ev) {
@@ -669,6 +680,7 @@
     mc.appendChild(page);
     mountComposerToolbox(page);
     bindComposerSubmission(page);
+    bindLogScrolling(page);
     applySidebarState();
     injectNavTab();
     return true;
@@ -812,6 +824,11 @@
     if (!url && kind === 'chat') url = cfg.chatUrl;
     if (!url) return Promise.reject(new Error('Direct ' + provider + ' ' + kind + ' endpoint is not configured.'));
     var controller = window.AbortController ? new AbortController() : null;
+    var externalSignal = options.signal;
+    if (controller && externalSignal) {
+      if (externalSignal.aborted) controller.abort();
+      else externalSignal.addEventListener('abort', function () { controller.abort(); }, { once: true });
+    }
     var timeout = Number(options.timeoutMs || 90000);
     var timer = controller ? setTimeout(function () { controller.abort(); }, Math.max(5000, timeout)) : null;
     var headers = Object.assign({}, options.headers || {});
@@ -2803,7 +2820,7 @@
   function requestWebSearch(thread, query) {
     var selected = typedModel('search', thread); if (!selected) return Promise.reject(new Error('No search model is configured.'));
     mediaUserMessage(thread, '⌕ Search the web: ' + query);
-    var typing = document.createElement('div'); typing.className = 'aic-typing'; typing.textContent = 'Searching the web with ' + (selected.label || selected.key) + '…'; var log = document.getElementById('aic-log'); if (log) { log.appendChild(typing); log.scrollTop = log.scrollHeight; }
+    var typing = document.createElement('div'); typing.className = 'aic-typing'; typing.textContent = 'Searching the web with ' + (selected.label || selected.key) + '…'; var log = document.getElementById('aic-log'); if (log) { log.appendChild(typing); scrollLog(false); }
     var maxResults = Number((document.getElementById('aic-search-limit-select') || {}).value || 6);
     var request = isDirectOmniRouteKey(selected.key) && directOmniRouteConfig()
       ? directOmniRouteFetch('search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, timeoutMs: 60000, body: JSON.stringify({ query: query, model: omniRouteModelId(selected.key), search_type: 'web', max_results: maxResults }) }).then(function (r) { return r.ok ? r.json().then(function (p) { return normalizeDirectSearchPayload(p, query, maxResults); }) : responseError(r, 'Direct OmniRoute web search failed.'); })
@@ -2814,7 +2831,7 @@
   function requestSpeech(thread, text) {
     var selected = typedModel('speech', thread); if (!selected) return Promise.reject(new Error('No speech model is configured.'));
     mediaUserMessage(thread, '♬ Read aloud: ' + text.slice(0, 500));
-    var log = document.getElementById('aic-log'), typing = document.createElement('div'); typing.className = 'aic-typing'; typing.textContent = 'Generating audio with ' + (selected.label || selected.key) + '…'; if (log) { log.appendChild(typing); log.scrollTop = log.scrollHeight; }
+    var log = document.getElementById('aic-log'), typing = document.createElement('div'); typing.className = 'aic-typing'; typing.textContent = 'Generating audio with ' + (selected.label || selected.key) + '…'; if (log) { log.appendChild(typing); scrollLog(false); }
     var body = { text: text, model: omniRouteModelId(selected.key), voice: String((document.getElementById('aic-speech-voice-select') || {}).value || 'alloy'), response_format: 'mp3' };
     var request = isDirectOmniRouteKey(selected.key) && directOmniRouteConfig()
       ? directOmniRouteFetch('speech', { method: 'POST', headers: { 'Content-Type': 'application/json' }, timeoutMs: 120000, body: JSON.stringify(body) })
@@ -2845,7 +2862,7 @@
   function requestVideo(thread, prompt) {
     var selected = typedModel('video', thread); if (!selected) return Promise.reject(new Error('No video model is configured.'));
     mediaUserMessage(thread, '▣ Generate video: ' + prompt);
-    var log = document.getElementById('aic-log'), typing = document.createElement('div'); typing.className = 'aic-typing'; typing.textContent = 'Starting video job with ' + (selected.label || selected.key) + '…'; if (log) { log.appendChild(typing); log.scrollTop = log.scrollHeight; }
+    var log = document.getElementById('aic-log'), typing = document.createElement('div'); typing.className = 'aic-typing'; typing.textContent = 'Starting video job with ' + (selected.label || selected.key) + '…'; if (log) { log.appendChild(typing); scrollLog(false); }
     var body = { prompt: prompt, model: omniRouteModelId(selected.key), aspect_ratio: String((document.getElementById('aic-video-aspect-select') || {}).value || '16:9'), duration: Number((document.getElementById('aic-video-duration-select') || {}).value || 5) };
     var finish = function (result, usedModel) {
       var cur = getThread(thread.id); if (!cur) return;
@@ -4008,6 +4025,39 @@
     toast('Fix request added to the composer. Review it, then send.', 'info');
   };
   /* ── rendering ── */
+  function bindLogScrolling(page) {
+    var log = page && (page.querySelector('#aic-log') || document.getElementById('aic-log'));
+    if (!log || log.dataset.aicScrollBound === 'true') return;
+    log.dataset.aicScrollBound = 'true';
+    log.addEventListener('scroll', updateJumpToLatest, { passive: true });
+  }
+
+  function logIsNearBottom() {
+    var log = document.getElementById('aic-log');
+    if (!log) return true;
+    return log.scrollHeight - log.scrollTop - log.clientHeight < 120;
+  }
+
+  function updateJumpToLatest() {
+    _logStuck = logIsNearBottom();
+    var jump = document.getElementById('aic-jump-latest');
+    if (jump) jump.hidden = _logStuck;
+  }
+
+  function scrollLog(force) {
+    var log = document.getElementById('aic-log');
+    if (!log) return;
+    if (force) _logStuck = true;
+    if (_logStuck) log.scrollTop = log.scrollHeight;
+    updateJumpToLatest();
+  }
+
+  window.aicScrollToLatest = function () {
+    scrollLog(true);
+    var input = document.getElementById('aic-input');
+    if (input) input.focus();
+  };
+
   function renderLog() {
     var log = document.getElementById('aic-log');
     if (!log) return;
@@ -4015,8 +4065,11 @@
     var messages = (t && t.messages) || [];
     if (!messages.length) {
       log.innerHTML = '<div class="aic-empty"><strong>What would you like to work on?</strong>Ask anything, attach notes, connect a GitHub repository, or simply say “create an image of…” and I’ll generate the image here.</div>';
+      scrollLog(true);
       return;
     }
+    var threadChanged = log.getAttribute('data-thread-id') !== String((t && t.id) || '');
+    _logStuck = threadChanged || logIsNearBottom();
     log.innerHTML = messages.map(function (m, index) {
       var cls = m.role === 'user' ? 'user' : (m.role === 'error' ? 'error' : 'assistant');
       var imageSource = m.imageData || m.imageUrl || '';
@@ -4032,7 +4085,8 @@
       var retry = m.retry && !m.imagePending ? '<button class="aic-retry-btn" onclick="aicRetryMessage(this)">↻ Retry</button>' : '';
       return '<div class="aic-msg-row ' + cls + '" data-index="' + index + '" data-raw="' + escAttr(m.content || '') + '">' + author + '<div class="aic-msg">' + body + retry + '</div>' + actions + '</div>';
     }).join('');
-    log.scrollTop = log.scrollHeight;
+    log.setAttribute('data-thread-id', String((t && t.id) || ''));
+    scrollLog(false);
   }
 
   function renderAll() {
@@ -4051,17 +4105,42 @@
     renderComposerToolbox();
   }
 
-  function setSending(on) {
+  function setSending(on, operation) {
     _sending = on;
+    _chatOperation = on ? (operation || '') : '';
+    if (!on) {
+      if (_chatAbort) { try { _chatAbort.abort(); } catch (e) {} }
+      _chatAbort = null;
+      _generationStopped = false;
+    }
     var btn = document.getElementById('aic-send-btn');
     if (btn) {
       var labels = { image: 'Generate', search: 'Search', speech: 'Speak', video: 'Generate' };
       btn.disabled = on;
       btn.textContent = on ? 'Sending…' : (labels[_activeComposerTool] || 'Send');
+      btn.setAttribute('aria-label', on ? 'Sending' : ((labels[_activeComposerTool] || 'Send') + ' message'));
+    }
+    var stop = document.getElementById('aic-stop-btn');
+    if (stop) {
+      stop.textContent = '\u25a0 Stop';
+      stop.hidden = !(on && _chatOperation === 'text');
     }
   }
 
+  window.aicStopGeneration = function () {
+    if (!_sending || !_chatAbort) return;
+    _generationStopped = true;
+    try { _chatAbort.abort(); } catch (e) {}
+    var stop = document.getElementById('aic-stop-btn');
+    if (stop) stop.textContent = 'Stopping…';
+  };
+
   window.aicKeydown = function (ev) {
+    if ((ev.ctrlKey || ev.metaKey) && String(ev.key || '').toLowerCase() === 'k') {
+      ev.preventDefault();
+      if (typeof window.aicNewThread === 'function') window.aicNewThread();
+      return;
+    }
     if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) dispatchComposerSend(ev);
   };
 
@@ -4287,8 +4366,25 @@
       }())
     };
 
-    setSending(true);
+    var chatAbort = window.AbortController ? new AbortController() : null;
+    _chatAbort = chatAbort;
+    _generationStopped = false;
+    setSending(true, 'text');
     var acc = '', gotChunk = false, settled = false;
+
+    function finishStopped() {
+      if (settled) return;
+      settled = true;
+      var cur = getThread(t.id);
+      if (cur) {
+        var last = cur.messages[cur.messages.length - 1];
+        if (last && last.role === 'assistant' && !last.content) cur.messages.pop();
+        cur.messages.push({ role: 'assistant', content: acc.trim() || 'Generation stopped.' });
+        upsertThread(cur);
+        if (currentThreadId() === t.id) renderLog();
+      }
+      setSending(false);
+    }
 
     function paint() {
       if (currentThreadId() !== t.id) return;
@@ -4299,7 +4395,7 @@
         var bubble = row.querySelector('.aic-msg');
                   if (bubble) bubble.innerHTML = projectProgressHtml(projectState(t), acc) + renderAssistantBody(acc, { creationPrompt: q, projectWorkflow: projectWorkflow }) + '<span class="aic-typing" style="display:inline;"> \u258c</span>';
 
-        log.scrollTop = log.scrollHeight;
+        scrollLog(false);
       }
     }
     function finishSuccess() {
@@ -4336,6 +4432,7 @@
     }
     function fallbackToBlocking(streamError) {
       if (settled) return;
+      if (_generationStopped) { finishStopped(); return; }
       // Re-POSTing an identical prompt that was just rejected for being too big
       // cannot succeed; it only doubles the wait before the student sees why.
       if (streamError && isOversizedFailure(String((streamError && streamError.message) || streamError))) {
@@ -4399,7 +4496,8 @@
       && (!body.web || body.web === 'off');
     if (directChatEligible) {
       directProviderFetch(directProvider, 'chat', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, timeoutMs: body.timeoutMs,
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        timeoutMs: body.timeoutMs, signal: chatAbort && chatAbort.signal,
         body: JSON.stringify(directChatPayload(directProvider, body))
       }).then(function (r) {
         if (!r.ok) return responseError(r, 'Direct ' + directProvider + ' chat failed.');
@@ -4411,6 +4509,7 @@
         gotChunk = true;
         finishSuccess();
       }).catch(function (err) {
+        if (_generationStopped) { finishStopped(); return; }
         // Direct provider failures are shown locally instead of silently routing
         // the same request through Render. Coding/workspace requests remain on
         // the protected proxy path by design.
@@ -4434,7 +4533,8 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify(body),
-        timeoutMs: body.timeoutMs
+        timeoutMs: body.timeoutMs,
+        signal: chatAbort && chatAbort.signal
       };
       if (!window.PrepPathBackend || typeof window.PrepPathBackend.fetch !== 'function') {
         throw new Error('Backend routing is unavailable. Reload the app.');
