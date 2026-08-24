@@ -33,6 +33,10 @@
   var BACKFILL_MAX_VIDEOS = 250;
   var BACKFILL_BATCH = 60;      // the server caps a /api/study/cached call at 60
   var _scanning = false;
+  // Empty means the full library (Dashboard/global entry points). The YouTube
+  // AI panel sets this to its current video so that Saved never leaks unrelated
+  // lecture notes or notebooks into that video-specific workflow.
+  var _modalVideoId = '';
 
   /* js/core/state.js declares `let appState`, and a top-level `let` in a classic
      script creates a GLOBAL LEXICAL binding — never a property of `window`. So
@@ -446,19 +450,39 @@
   function renderModal() {
     var host = document.getElementById('nlib-list');
     if (!host) return;
-    var active = filter();
-    var counts = { all: all().length, notebook: all('notebook').length, video: all('video').length };
-    var chips = [['all', 'All (' + counts.all + ')'],
-                 ['video', 'Single lectures (' + counts.video + ')'],
-                 ['notebook', 'Notebooks (' + counts.notebook + ')']];
+    var scoped = !!_modalVideoId;
+    var rows;
     var bar = document.getElementById('nlib-filters');
-    if (bar) {
-      bar.innerHTML = chips.map(function (c) {
-        return '<button type="button" class="nlib-chip' + (c[0] === active ? ' on' : '') +
-          '" onclick="NotesLibrary.setFilter(\'' + c[0] + '\')">' + esc(c[1]) + '</button>';
-      }).join('');
+    var title = document.getElementById('nlib-title');
+    var sub = document.getElementById('nlib-sub');
+
+    if (scoped) {
+      rows = all('video').filter(function (row) {
+        return String((row.raw && row.raw.vid) || '') === _modalVideoId;
+      });
+      // A video-specific Saved button has only one meaningful kind. Hiding the
+      // global chips also prevents a remembered "Notebooks" filter from making
+      // a real saved note appear to be missing.
+      if (bar) { bar.innerHTML = ''; bar.style.display = 'none'; }
+      if (title) title.textContent = 'Notes for this video';
+      if (sub) sub.textContent = 'Saved notes for the current lecture — opens from server storage, no AI needed.';
+    } else {
+      var active = filter();
+      var counts = { all: all().length, notebook: all('notebook').length, video: all('video').length };
+      var chips = [['all', 'All (' + counts.all + ')'],
+                   ['video', 'Single lectures (' + counts.video + ')'],
+                   ['notebook', 'Notebooks (' + counts.notebook + ')']];
+      if (bar) {
+        bar.style.display = '';
+        bar.innerHTML = chips.map(function (c) {
+          return '<button type="button" class="nlib-chip' + (c[0] === active ? ' on' : '') +
+            '" onclick="NotesLibrary.setFilter(\'' + c[0] + '\')">' + esc(c[1]) + '</button>';
+        }).join('');
+      }
+      if (title) title.textContent = 'My AI Notes';
+      if (sub) sub.textContent = 'Everything you have generated — opens instantly, no AI needed.';
+      rows = all(active);
     }
-    var rows = all(active);
     host.innerHTML = rowsHtml(rows, { actions: true }) +
       // Offer the scan alongside a populated list too: a first scan only covers
       // the library as it was, so a newly imported playlist can be checked again.
@@ -467,7 +491,8 @@
         '</div>' : '');
   }
 
-  function openModal() {
+  function openModal(videoId) {
+    _modalVideoId = String(videoId || '').trim();
     var overlay = document.getElementById('nlib-overlay');
     if (!overlay) return;
     renderModal();
@@ -475,6 +500,7 @@
     else { overlay.classList.add('open'); overlay.setAttribute('aria-hidden', 'false'); }
   }
   function closeModal() {
+    _modalVideoId = '';
     var overlay = document.getElementById('nlib-overlay');
     if (!overlay || !overlay.classList.contains('open')) return;
     if (window.StudyPlannerDialog) window.StudyPlannerDialog.close(overlay);
