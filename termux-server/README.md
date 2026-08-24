@@ -114,6 +114,34 @@ already manages.
 ./health.sh             # in a second Ubuntu shell
 ```
 
+### One command instead of the above
+
+`examzen` wraps the whole cycle — enter the container, pull, restart, wait for
+the tunnel URL — so day-to-day use is a single word. Install it **in Termux**,
+once:
+
+```sh
+proot-distro login ubuntu -- cat /opt/examzen/termux-server/examzen > "$PREFIX/bin/examzen"
+chmod +x "$PREFIX/bin/examzen"
+```
+
+Then, from a plain Termux prompt:
+
+| Command | Does |
+|---|---|
+| `examzen` | pull latest `main`, restart, print the tunnel URL |
+| `examzen start` | start without pulling |
+| `examzen stop` | stop everything and release the wake lock |
+| `examzen url` | print the current tunnel URL |
+| `examzen status` | run `health.sh` |
+| `examzen logs` | follow `proxy.log` (Ctrl-C leaves; the server keeps running) |
+| `examzen shell` | drop into the container |
+
+Unlike `start-all.sh`, this detaches the supervisor and returns your prompt, so
+the URL and logs are reachable without a second session. It takes the Termux
+wake lock for you — without it Android suspends the server once the screen
+sleeps.
+
 `health.sh` checks more than "is it listening", because the proxy answers
 `/health` perfectly well while broken. Look at these flags:
 

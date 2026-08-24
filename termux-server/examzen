@@ -1,0 +1,130 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# ═══════════════════════════════════════════════════════════════════════════
+# examzen — one Termux command to run the phone server.
+#
+# Replaces the manual sequence that has to be retyped after every change:
+#
+#   proot-distro login ubuntu
+#   cd /opt/examzen && git pull --ff-only origin main
+#   cd termux-server && ./stop-all.sh && ./start-all.sh
+#   grep -ao 'https://...trycloudflare.com' logs/tunnel.log | tail -n 1
+#
+# INSTALL (run in TERMUX, not inside the container)
+#   proot-distro login ubuntu -- cat /opt/examzen/termux-server/examzen > "$PREFIX/bin/examzen"
+#   chmod +x "$PREFIX/bin/examzen"
+#
+# USAGE
+#   examzen            update, restart, print the tunnel URL   (the usual one)
+#   examzen start      start without pulling
+#   examzen stop       stop everything, release the wake lock
+#   examzen restart    restart without pulling
+#   examzen url        print the current tunnel URL
+#   examzen status     run health.sh
+#   examzen logs       follow the proxy log (Ctrl-C to leave; server keeps running)
+#   examzen shell      drop into the container
+#
+# This file lives in the container but must RUN in Termux: only Termux can take
+# the wake lock, and without it Android suspends the server once the screen
+# sleeps. It therefore descends into the container itself.
+# ═══════════════════════════════════════════════════════════════════════════
+set -uo pipefail
+
+DISTRO="${DISTRO:-ubuntu}"
+REPO_DIR="${REPO_DIR:-/opt/examzen}"
+SERVER_DIR="$REPO_DIR/termux-server"
+URL_WAIT_SECONDS="${URL_WAIT_SECONDS:-120}"
+
+bold=$'\033[1m'; green=$'\033[1;32m'; yellow=$'\033[1;33m'; red=$'\033[1;31m'; off=$'\033[0m'
+say()  { printf '%s[examzen]%s %s\n' "$green" "$off" "$*"; }
+warn() { printf '%s[examzen]%s %s\n' "$yellow" "$off" "$*"; }
+die()  { printf '%s[examzen]%s %s\n' "$red" "$off" "$*" >&2; exit 1; }
+
+command -v proot-distro >/dev/null || die "proot-distro not found. Run bootstrap-termux.sh first."
+
+# Every container call goes through this, so the distro name and login flags are
+# specified once. `bash -lc` is required: start-all.sh relies on server.env being
+# sourced by the login shell.
+in_container() { proot-distro login "$DISTRO" -- bash -lc "$1"; }
+
+# Termux:API may be absent. That is survivable — the server still runs, it just
+# stops when the device sleeps — so warn instead of failing.
+take_wake_lock() {
+  if command -v termux-wake-lock >/dev/null; then
+    termux-wake-lock 2>/dev/null && return 0
+  fi
+  warn "could not take a wake lock; the server may stop when the screen sleeps (install Termux:API)."
+}
+
+release_wake_lock() { command -v termux-wake-unlock >/dev/null && termux-wake-unlock 2>/dev/null; return 0; }
+
+# The published URL changes on every Quick Tunnel reconnect, so read it from the
+# log rather than caching it. -a because cloudflared writes control characters,
+# which makes grep treat the file as binary and print nothing.
+print_url() {
+  local url
+  url="$(in_container "grep -ao 'https://[a-z0-9-]*\.trycloudflare\.com' '$SERVER_DIR/logs/tunnel.log' 2>/dev/null | tail -n 1")"
+  url="${url//$'\r'/}"
+  if [ -n "$url" ]; then
+    printf '%s  %s%s%s\n' "public URL:" "$bold" "$url" "$off"
+    return 0
+  fi
+  return 1
+}
+
+start_server() {
+  local do_update="$1"
+
+  take_wake_lock
+
+  # `nohup … &` inside the container detaches the supervisor so this command can
+  # report the URL and hand the prompt back. start-all.sh already refuses to run
+  # twice, so a stale supervisor cannot be double-started.
+  #
+  # Only lines appended after this point are searched for the URL, so a URL from
+  # a previous session is never reported as the current one.
+  in_container "
+    set -uo pipefail
+    cd '$REPO_DIR' || exit 1
+    if [ '$do_update' = 1 ]; then
+      echo '── pulling latest main ──'
+      git pull --ff-only origin main || echo 'warning: pull failed; starting the current checkout'
+    fi
+    git log -1 --oneline
+    cd '$SERVER_DIR' || exit 1
+    mkdir -p logs
+    before=\$(wc -l < logs/tunnel.log 2>/dev/null || echo 0)
+    ./stop-all.sh >/dev/null 2>&1
+    nohup ./start-all.sh >/dev/null 2>&1 &
+    echo '── waiting for the tunnel URL ──'
+    for i in \$(seq 1 $URL_WAIT_SECONDS); do
+      url=\$(tail -n +\$((before + 1)) logs/tunnel.log 2>/dev/null \
+            | grep -ao 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -n 1)
+      [ -n \"\$url\" ] && break
+      sleep 1
+    done
+    printf 'proxy   http://127.0.0.1:8080\nbot     http://127.0.0.1:3000\n'
+  "
+
+  if print_url; then
+    say "running. Use ${bold}examzen stop${off} to stop it, ${bold}examzen logs${off} to watch requests."
+  else
+    warn "started, but no tunnel URL appeared within ${URL_WAIT_SECONDS}s."
+    warn "check the log:  examzen logs-tunnel"
+  fi
+}
+
+case "${1:-up}" in
+  up)         start_server 1 ;;
+  start)      start_server 0 ;;
+  restart)    start_server 0 ;;
+  stop)       in_container "cd '$SERVER_DIR' && ./stop-all.sh"; release_wake_lock; say "stopped." ;;
+  url)        print_url || die "no tunnel URL found yet." ;;
+  status)     in_container "cd '$SERVER_DIR' && ./health.sh" ;;
+  logs)       in_container "tail -n 40 -f '$SERVER_DIR/logs/proxy.log'" ;;
+  logs-tunnel) in_container "tail -n 60 '$SERVER_DIR/logs/tunnel.log'" ;;
+  shell)      in_container "cd '$SERVER_DIR' && exec bash -l" ;;
+  -h|--help|help)
+    sed -n '4,25p' "$0" | sed 's/^# \{0,1\}//'
+    ;;
+  *) die "unknown command '${1}'. Try: examzen --help" ;;
+esac
