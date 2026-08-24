@@ -49,6 +49,7 @@
   var _sending = false;
   var _chatAbort = null;
   var _generationStopped = false;
+  var _thinkingLabel = '';   // phase text shown in the animated pending bubble
   var _chatOperation = '';
   // Only one optional tool panel may be open at a time. The active panel is
   // moved into the universal composer instead of rendering as a separate page-wide box.
@@ -415,6 +416,19 @@
     .aic-retry-btn{margin-top:7px;padding:5px 9px;border:1px solid rgba(200,75,67,.4);border-radius:7px;background:transparent;color:#c54b43;font-size:.7rem;cursor:pointer;}.aic-retry-btn:hover{background:rgba(200,75,67,.1);}
     .aic-empty{max-width:500px;margin:clamp(2rem,8vh,5rem) auto 0;text-align:center;color:var(--muted);font-size:.88rem;line-height:1.55;}
     .aic-empty strong{display:block;margin-bottom:8px;color:var(--text);font-size:1.15rem;letter-spacing:-.02em;}
+    /* Waiting states. A slow model and a dead request look identical without
+       motion, so every pending phase gets an animated affordance: bouncing dots
+       plus a sweeping tint before the first token, a blinking caret once tokens
+       start arriving. */
+    .aic-thinking{display:inline-flex;align-items:center;gap:10px;padding:9px 14px;border:1px solid color-mix(in srgb,var(--border) 62%,transparent);border-radius:13px;background:linear-gradient(100deg,color-mix(in srgb,var(--surface) 90%,var(--card)) 0%,color-mix(in srgb,var(--accent) 13%,var(--surface)) 50%,color-mix(in srgb,var(--surface) 90%,var(--card)) 100%);background-size:240% 100%;animation:aic-think-sweep 2.4s ease-in-out infinite;}
+    .aic-thinking-dots{display:inline-flex;align-items:center;gap:4px;height:11px;}
+    .aic-thinking-dots i{width:6px;height:6px;border-radius:50%;background:var(--accent);animation:aic-think-bounce 1.3s ease-in-out infinite;}
+    .aic-thinking-dots i:nth-child(2){animation-delay:.16s;}.aic-thinking-dots i:nth-child(3){animation-delay:.32s;}
+    .aic-thinking-label{color:var(--muted);font-size:.76rem;font-weight:600;}
+    @keyframes aic-think-bounce{0%,72%,100%{transform:translateY(0) scale(.7);opacity:.42;}36%{transform:translateY(-5px) scale(1);opacity:1;}}
+    @keyframes aic-think-sweep{from{background-position:130% 0;}to{background-position:-30% 0;}}
+    .aic-stream-caret{display:inline-block;margin-left:1px;color:var(--accent);animation:aic-caret-blink 1s steps(1,end) infinite;}
+    @keyframes aic-caret-blink{0%,49%{opacity:1;}50%,100%{opacity:0;}}
     .aic-typing{color:var(--muted);font-size:.78rem;font-style:italic;}.aic-image-pending{display:flex;align-items:center;gap:8px;padding:10px 13px;border:1px solid color-mix(in srgb,var(--border) 75%,transparent);border-radius:11px;background:color-mix(in srgb,var(--surface) 70%,transparent);color:var(--muted);}.aic-image-spinner{width:13px;height:13px;border:2px solid color-mix(in srgb,var(--muted) 30%,transparent);border-top-color:var(--accent);border-radius:50%;animation:aic-spin .8s linear infinite;}@keyframes aic-spin{to{transform:rotate(360deg);}}
     .aic-files-bar,.aic-github-context{display:flex;align-items:center;gap:7px;flex-wrap:wrap;width:100%;max-width:none;margin:0;padding:0 clamp(1rem,4vw,3.5rem) .45rem;color:var(--muted);font-size:.7rem;}
     .aic-file-pill{display:flex;align-items:center;gap:5px;padding:4px 8px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--muted);font-size:.68rem;}
@@ -541,7 +555,10 @@
     .aic-hint{flex:1;color:var(--muted);font-size:.64rem;}
     .aic-send{display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:32px;padding:0 11px;border:0;border-radius:9px;background:var(--accent);color:#17130e;font-size:.78rem;font-weight:800;cursor:pointer;transition:transform .16s ease-out,opacity .16s ease-out;}
     .aic-send:hover{transform:translateY(-1px);}.aic-send:active{transform:scale(.97);}.aic-send:disabled{opacity:.5;cursor:default;transform:none;}
-    .aic-stop{display:inline-flex;align-items:center;justify-content:center;height:32px;padding:0 11px;border:1px solid rgba(197,75,67,.45);border-radius:9px;background:rgba(197,75,67,.08);color:#c54b43;font:inherit;font-size:.76rem;font-weight:800;cursor:pointer;}
+    .aic-stop{display:inline-flex;align-items:center;justify-content:center;height:32px;padding:0 11px;border:1px solid rgba(197,75,67,.45);border-radius:9px;background:rgba(197,75,67,.08);color:#c54b43;font:inherit;font-size:.76rem;font-weight:800;cursor:pointer;animation:aic-rise .18s ease-out both;transition:background .16s ease-out,transform .16s ease-out;}
+    /* A sheen on the disabled Send button keeps "Sending…" visibly alive. */
+    .aic-send.is-sending{position:relative;overflow:hidden;opacity:.72;}
+    .aic-send.is-sending::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.5),transparent);transform:translateX(-100%);animation:aic-yt-sheen 1.25s linear infinite;}
     .aic-stop:hover{background:rgba(197,75,67,.13);}.aic-stop[hidden]{display:none;}
     .aic-file-input{display:none;}
     .aic-persona-box,.aic-image-box,.aic-github-box,.aic-media-box{padding:.8rem 1.25rem;border-bottom:1px solid color-mix(in srgb,var(--border) 65%,transparent);background:color-mix(in srgb,var(--surface) 70%,var(--card));}
@@ -551,7 +568,7 @@
     @keyframes aic-rise{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
     @media (max-width:820px){.aic-shell{grid-template-columns:205px minmax(0,1fr);height:100%;border-radius:14px;}.aic-side{width:auto;}.aic-head{align-items:flex-start;flex-direction:column;padding:.8rem .9rem;}.aic-head-controls{width:100%;flex-wrap:wrap;}.aic-model-wrap{flex:1 1 100%;}.aic-model-wrap .aic-select{flex:1;max-width:none;}.aic-quick-actions{overflow-x:auto;padding:.5rem .9rem;}.aic-log{padding-top:1.5rem;}.aic-msg-row.user .aic-msg{max-width:86%;}.aic-hint{display:none;}}
     @media (max-width:560px){.aic-shell{grid-template-columns:1fr;min-height:0;height:100%;}.aic-side{display:none;}.aic-head{flex-direction:row;align-items:center;}.aic-head-left{flex:1;}.aic-head-controls{width:auto;}.aic-head-controls .aic-model-wrap,.aic-head-controls .aic-select,.aic-head-controls .aic-control-label{display:none;}.aic-log{padding-left:1rem;padding-right:1rem;}.aic-form{padding-left:.75rem;padding-right:.75rem;}.aic-quick-actions{padding-left:.75rem;padding-right:.75rem;}.aic-msg{font-size:.88rem;}}
-    @media (prefers-reduced-motion:reduce){.aic-msg-row,.aic-new-btn,.aic-send{animation:none;transition:none;}}
+    @media (prefers-reduced-motion:reduce){.aic-msg-row,.aic-new-btn,.aic-send,.aic-stop{animation:none;transition:none;}.aic-thinking,.aic-thinking-dots i,.aic-stream-caret,.aic-send.is-sending::after{animation:none;}.aic-thinking-dots i{opacity:1;transform:none;}}
   `;
   document.head.appendChild(st);
 
@@ -729,8 +746,12 @@
     if (input) input.placeholder = placeholders[_activeComposerTool] || 'Message AI Chat…';
     if (send) {
       var labels = { image: 'Generate', search: 'Search', speech: 'Speak', video: 'Generate' };
-      send.textContent = labels[_activeComposerTool] || 'Send';
-      send.setAttribute('aria-label', labels[_activeComposerTool] || 'Send message');
+      // Never overwrite the in-flight "Sending…" state: this runs on unrelated
+      // re-renders and would otherwise make a live request look idle.
+      if (!_sending) {
+        send.textContent = labels[_activeComposerTool] || 'Send';
+        send.setAttribute('aria-label', labels[_activeComposerTool] || 'Send message');
+      }
     }
   }
 
@@ -4074,7 +4095,14 @@
       var cls = m.role === 'user' ? 'user' : (m.role === 'error' ? 'error' : 'assistant');
       var imageSource = m.imageData || m.imageUrl || '';
       var imageLabel = m.imageModelLabel || ((m.imageProvider || m.imageModel) ? [m.imageProvider, m.imageModel].filter(Boolean).join(' / ') : '');
-      var body = m.imagePending
+      // The trailing empty assistant message is the placeholder aicSend pushes
+      // before the request resolves. While that request is live it must show the
+      // animated pending state instead of an empty bubble.
+      var pendingReply = _sending && index === messages.length - 1
+        && m.role === 'assistant' && !m.content && !m.imagePending && !imageSource && !m.mediaType;
+      var body = pendingReply
+        ? thinkingHtml(_thinkingLabel)
+        : m.imagePending
         ? '<div class="aic-image-pending" aria-live="polite"><span class="aic-image-spinner" aria-hidden="true"></span><span>' + esc(m.content || 'Generating image…') + '</span></div>'
         : imageSource
           ? '<div class="aic-image-caption">' + esc(m.content || (m.imageEdit ? 'Image edited' : 'Image generated')) + (imageLabel ? '<span class="aic-image-model"> · Generated with ' + esc(imageLabel) + '</span>' : '') + '</div><img class="aic-gen-image" src="' + escAttr(imageSource) + '" alt="' + escAttr(m.imageEdit ? 'Edited image' : 'Generated image') + '"><div class="aic-image-actions"><button onclick="aicDownloadImage(this)">↓ Download image</button></div>'
@@ -4105,8 +4133,30 @@
     renderComposerToolbox();
   }
 
+  // Rendered into the empty assistant bubble so the wait before the first token
+  // is visibly a wait, not a silent failure.
+  function thinkingHtml(label) {
+    return '<div class="aic-thinking" role="status" aria-live="polite">'
+      + '<span class="aic-thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span>'
+      + '<span class="aic-thinking-label">' + esc(label || 'Thinking…') + '</span>'
+      + '</div>';
+  }
+
+  // Naming the slow part sets the right expectation: a transcript read or a
+  // code build legitimately takes far longer than a plain reply.
+  function thinkingLabelFor(body) {
+    if (!body) return 'Thinking…';
+    if (body.youtube) return 'Reading the video transcript…';
+    if (body.github) return 'Reading the repository files…';
+    if (body.web && body.web !== 'off' && body.web !== 'auto') return 'Searching the web…';
+    if (body.artifactMode) return 'Building your study file…';
+    if (body.workspace || body.coding) return 'Writing code…';
+    return 'Thinking…';
+  }
+
   function setSending(on, operation) {
     _sending = on;
+    if (!on) _thinkingLabel = '';
     _chatOperation = on ? (operation || '') : '';
     if (!on) {
       if (_chatAbort) { try { _chatAbort.abort(); } catch (e) {} }
@@ -4118,6 +4168,7 @@
       var labels = { image: 'Generate', search: 'Search', speech: 'Speak', video: 'Generate' };
       btn.disabled = on;
       btn.textContent = on ? 'Sending…' : (labels[_activeComposerTool] || 'Send');
+      btn.classList.toggle('is-sending', !!on);
       btn.setAttribute('aria-label', on ? 'Sending' : ((labels[_activeComposerTool] || 'Send') + ' message'));
     }
     var stop = document.getElementById('aic-stop-btn');
@@ -4372,6 +4423,11 @@
     setSending(true, 'text');
     var acc = '', gotChunk = false, settled = false;
 
+    // renderLog already ran above, before _sending was true, so the placeholder
+    // bubble is still empty. Repaint now that the pending state applies.
+    _thinkingLabel = thinkingLabelFor(body);
+    if (currentThreadId() === t.id) renderLog();
+
     function finishStopped() {
       if (settled) return;
       settled = true;
@@ -4393,7 +4449,7 @@
       if (row) {
         row.setAttribute('data-raw', acc);
         var bubble = row.querySelector('.aic-msg');
-                  if (bubble) bubble.innerHTML = projectProgressHtml(projectState(t), acc) + renderAssistantBody(acc, { creationPrompt: q, projectWorkflow: projectWorkflow }) + '<span class="aic-typing" style="display:inline;"> \u258c</span>';
+                  if (bubble) bubble.innerHTML = projectProgressHtml(projectState(t), acc) + renderAssistantBody(acc, { creationPrompt: q, projectWorkflow: projectWorkflow }) + '<span class="aic-stream-caret" aria-hidden="true">\u258c</span>';
 
         scrollLog(false);
       }
