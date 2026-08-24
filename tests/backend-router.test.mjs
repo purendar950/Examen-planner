@@ -291,13 +291,42 @@ await test('stateful AI creation and every follow-up retain server affinity', as
   assert.match(chatSource, /\/media'[\s\S]*?backendServerId: backendServerId/);
 });
 
-await test('Turbo stream URL stays on the server that returned info', async () => {
-  const start = turboSource.indexOf("var infoPath = '/api/info");
+await test('Turbo selects its own server and keeps info and stream on it', async () => {
+  const start = turboSource.indexOf('turboPickServer(ctrl.signal)');
+  assert.ok(start > 0, 'expected Turbo to resolve its own server before /api/info');
   const end = turboSource.indexOf("candidate.addEventListener('loadedmetadata'", start);
   const handoff = turboSource.slice(start, end);
-  assert.match(handoff, /serverForResponse\(r\)/);
-  assert.match(handoff, /var streamBase = res\.owner\.url/);
+  // Both calls must leave from the SAME host: a googlevideo format URL is signed
+  // with the extracting server's IP (ip= sits inside sparams), so no other host
+  // can replay it.
+  assert.match(handoff, /turboBase = base/);
+  assert.match(handoff, /base \+ '\/api\/info\?id='/);
+  assert.match(handoff, /turboBase \+ '\/api\/stream\?id='/);
+  // Turbo must not take the shared media ROUTING POLICY: that policy is shared
+  // with the AI routes, and video is the traffic that actually costs bandwidth.
+  assert.doesNotMatch(handoff, /PrepPathBackend\.fetch/);
+  assert.doesNotMatch(handoff, /serverForResponse/);
   assert.doesNotMatch(handoff, /baseUrl\('media'\)/);
+});
+
+await test('Turbo prefers a self-hosted server and falls back to Render last', async () => {
+  const start = turboSource.indexOf('function turboServerCandidates');
+  assert.ok(start > 0, 'expected a Turbo candidate list');
+  const end = turboSource.indexOf('function turboServerIsLive', start);
+  const candidates = turboSource.slice(start, end);
+  // The registry is consumed as a list of candidates (this is how the phone's
+  // rotating Quick Tunnel URL is discovered), not as a policy.
+  assert.match(candidates, /getConfig/);
+  // Render is appended AFTER the registry entries, and registry entries that
+  // point at Render are filtered out, so registry order cannot promote it.
+  assert.match(candidates, /isRender/);
+  const renderAdd = candidates.lastIndexOf('add(TURBO_RENDER_URL)');
+  const registryAdd = candidates.indexOf('servers.forEach');
+  assert.ok(registryAdd > 0 && renderAdd > registryAdd,
+    'Render must be the last candidate, after any self-hosted server');
+  // A LAN http:// entry can never be used from an https page; it must be
+  // dropped during selection rather than failing opaquely as a media error.
+  assert.match(candidates, /mixed content|\^http:\\\/\\\//);
 });
 
 await test('an internal route override is honored but never forwarded to fetch', async () => {

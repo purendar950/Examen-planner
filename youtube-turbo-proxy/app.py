@@ -1046,27 +1046,71 @@ def _extract(video_id, force=False, cookie_retry_budget=None):
                 raise
             cookie_retry_budget["remaining"] -= 1
             log.warning(
-                "Cookie-authenticated extraction requested a page reload for %s; retrying once without cookies using a progressive client.",
+                "Cookie-authenticated extraction requested a page reload for %s; retrying once without cookies.",
                 video_id,
             )
             cookie_less_opts = dict(ydl_opts)
             cookie_less_opts.pop("cookiefile", None)
-            # Current cookie-less default clients can return only split
-            # video+audio tracks (for example 616+251-2). Turbo deliberately
-            # proxies one range-addressable file into one native <video>, so
-            # request android_vr here: it exposes progressive MP4 itag 18 with
-            # H.264 video + AAC audio over HTTPS. Merge rather than replace the
-            # extractor args so the JS solver and bgutil PO-token settings stay.
-            retry_extractor_args = {
-                name: dict(values)
-                for name, values in (cookie_less_opts.get("extractor_args") or {}).items()
-            }
-            youtube_args = dict(retry_extractor_args.get("youtube") or {})
-            youtube_args["player_client"] = ["android_vr"]
-            retry_extractor_args["youtube"] = youtube_args
-            cookie_less_opts["extractor_args"] = retry_extractor_args
-            with yt_dlp.YoutubeDL(cookie_less_opts) as ydl:
-                raw = ydl.extract_info(url, download=False)
+
+            def _cookie_less_extract(player_client):
+                """Re-extract without cookies, optionally pinning one client.
+
+                Merges rather than replaces the extractor args so the JS solver
+                and bgutil PO-token settings survive the retry.
+                """
+                attempt_opts = dict(cookie_less_opts)
+                retry_extractor_args = {
+                    name: dict(values)
+                    for name, values in (attempt_opts.get("extractor_args") or {}).items()
+                }
+                youtube_args = dict(retry_extractor_args.get("youtube") or {})
+                if player_client:
+                    youtube_args["player_client"] = [player_client]
+                else:
+                    youtube_args.pop("player_client", None)
+                retry_extractor_args["youtube"] = youtube_args
+                attempt_opts["extractor_args"] = retry_extractor_args
+                with yt_dlp.YoutubeDL(attempt_opts) as ydl:
+                    return ydl.extract_info(url, download=False)
+
+            # Order matters, and getting it wrong is INVISIBLE on /api/info.
+            #
+            # This retry used to pin android_vr outright, because cookie-less
+            # default clients once returned only split video+audio tracks
+            # (616+251-2) while android_vr exposed progressive MP4 itag 18.
+            # That is no longer the trade-off. Measured against a datacenter IP
+            # with yt-dlp 2026.08.19 and the bgutil provider on :4416:
+            #   default clients -> itag 18 URL carries pot=, googlevideo
+            #                      answers 206 and streams real bytes
+            #   android_vr      -> itag 18 URL carries NO pot=, googlevideo
+            #                      answers 403 for EVERY window
+            # So android_vr yields metadata that /api/info happily returns
+            # (one 360p progressive format, looks perfectly healthy) while the
+            # byte proxy fails every window with stream_rejected 403 — Turbo
+            # loads, then dies, with nothing wrong upstream of the format URL.
+            # Try the PO-token-bearing default clients first and keep android_vr
+            # only for the case they expose no progressive format at all.
+            raw = None
+            progressive_raw = None
+            cookie_less_error = None
+            for player_client in (None, "android_vr"):
+                try:
+                    candidate = _cookie_less_extract(player_client)
+                except yt_dlp.utils.DownloadError as attempt_exc:
+                    if cookie_less_error is None:
+                        cookie_less_error = attempt_exc
+                    continue
+                if _normalize(candidate)["formats"]:
+                    progressive_raw = candidate
+                    break
+                # Keep the first successful-but-format-less extraction so the
+                # next client still gets a turn, and so /api/info can report an
+                # accurate "no progressive streams" 404 if none of them find one.
+                if raw is None:
+                    raw = candidate
+            raw = progressive_raw or raw
+            if raw is None:
+                raise cookie_less_error or exc
         info = _normalize(raw)
         compact = _compact_extract(raw)
         del raw
@@ -1084,6 +1128,37 @@ def _direct_format(extraction, itag):
                 "http_headers": dict(fmt.get("http_headers") or {}),
             }
     return None
+
+
+def _extract_cookie_less(video_id):
+    """Force a cookie-less extraction and refresh the shared cache with it.
+
+    googlevideo serves a format URL only when it carries a PO token: measured
+    from a datacenter IP, a pot=-bearing itag 18 URL answers 206 with real
+    bytes while a PO-token-less one answers 403 for every window. A
+    cookie-authenticated extraction can hand back exactly such a URL, and
+    because the metadata is perfectly good /api/info succeeds while the byte
+    proxy fails — so re-extracting with the SAME cookies just reproduces the
+    same dead URL. This gives the byte proxy one way to escalate past the
+    cookies to the PO-token-bearing default clients.
+
+    Shares _extract_sem so it cannot add a concurrent Deno subprocess, and
+    writes through to _cache so a browser seek (a fresh /api/stream request)
+    reuses the URL that actually works instead of rediscovering the 403.
+    """
+    with _extract_sem:
+        opts = _base_ydl_opts()
+        opts.pop("cookiefile", None)
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            raw = ydl.extract_info(
+                "https://www.youtube.com/watch?v=" + video_id, download=False)
+        info = _normalize(raw)
+        compact = _compact_extract(raw)
+        del raw
+        with _cache_lock:
+            _cache[video_id] = {"ts": time.time(), "info": info, "compact": compact}
+            _prune_ts_cache(_cache, VIDEO_CACHE_MAX)
+    return info, compact
 
 
 # ------------------------------------------------------------------ transcript
@@ -15750,6 +15825,31 @@ def api_stream():
             upstream = open_window(stream_format, start, window_end(start))
         except requests.RequestException:
             return jsonify({"error": "stream_upstream_unreachable"}), 502
+
+        # Still refused. A forced re-extract only helps when the URL had gone
+        # stale; it cannot help when the cookies themselves are what produced a
+        # URL googlevideo will never serve (no PO token => 403 on every window,
+        # while the metadata stays valid enough for /api/info to look healthy).
+        # Escalate past the cookies exactly once.
+        if upstream.status_code in (403, 410) and _HAS_COOKIES:
+            upstream.close()
+            app.logger.warning(
+                "Turbo upstream still returned %s for %s itag %s after a refresh; "
+                "escalating to a cookie-less extraction once.",
+                upstream.status_code, video_id, itag,
+            )
+            try:
+                _, cookie_less_raw = _extract_cookie_less(video_id)
+                cookie_less_format = _direct_format(cookie_less_raw, itag)
+            except Exception:  # noqa: BLE001
+                cookie_less_format = None
+            if not cookie_less_format:
+                return jsonify({"error": "stream_rejected", "status": 403}), 403
+            stream_format = cookie_less_format
+            try:
+                upstream = open_window(stream_format, start, window_end(start))
+            except requests.RequestException:
+                return jsonify({"error": "stream_upstream_unreachable"}), 502
 
     if upstream.status_code >= 400:
         status = upstream.status_code
