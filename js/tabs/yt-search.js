@@ -10,9 +10,8 @@
   let searchPlayId="";
   let searchPlayTitle="";
   let searchPlayKind="video";
-  let searchRonflixCtrl=null;
-  let searchRonflixSeq=0;
-  let searchRonflixSpeed=1;
+  let hasActivePlayer=false;
+  const localNoHttpReferer=["content:","file:"].includes(location.protocol);
 
   function shuffled(list){
     const out=[...list];
@@ -73,11 +72,7 @@
   const recentSection=document.getElementById("youtubeRecent");
   const recentRow=document.getElementById("youtubeRecentRow");
   const recentClear=document.getElementById("youtubeRecentClear");
-  const searchRonflixBox=document.getElementById("ytSearchRonflix");
-  const searchRonflixVideo=document.getElementById("ytSearchRonflixVideo");
-  const searchRonflixStatus=document.getElementById("ytSearchRonflixStatus");
-  const searchRonflixBar=document.getElementById("ytSearchRonflixBar");
-  const searchRonflixPip=document.getElementById("ytSearchRonflixPip");
+  const ytPlayer=document.getElementById("youtubePlayer");
 
   function esc(value){
     return String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
@@ -174,97 +169,48 @@
     });
   }
 
-  function setSearchRonflixStatus(message){
-    if(!searchRonflixStatus)return;
-    searchRonflixStatus.classList.toggle("show",!!message);
-    searchRonflixStatus.innerHTML=message?`<span class="yt-search-ronflix-spinner"></span><span>${esc(message)}</span>`:"";
-  }
+  function playYouTubeEmbed(id,title,isList=false){
+    if(!ytPlayer)return;
+    hasActivePlayer=true;
+    ytNow.textContent=title;
+    ytPlayerCard.classList.add("show");
 
-  function stopSearchRonflix(){
-    searchRonflixSeq++;
-    if(searchRonflixCtrl){try{searchRonflixCtrl.abort();}catch(_){ } searchRonflixCtrl=null;}
-    if(searchRonflixVideo){
-      try{searchRonflixVideo.pause();}catch(_){ }
-      searchRonflixVideo.removeAttribute("src");
-      try{searchRonflixVideo.load();}catch(_){ }
-      searchRonflixVideo.style.display="none";
+    if(localNoHttpReferer){
+      ytPlayer.removeAttribute("src");
+      ytPlayer.style.display="none";
+      ytLocalFallback.classList.add("show");
+      ytLocalFallback.innerHTML=`<div class="youtube-local-box">
+        <img src="${isList?PLAYLIST_THUMB:`https://i.ytimg.com/vi/${encodeURIComponent(id)}/hqdefault.jpg`}" alt="">
+        <div class="youtube-local-title">${esc(title)}</div>
+        <div class="youtube-local-text">YouTube embeds need an HTTP Referer. Open the deployed site or use an http://localhost preview.</div>
+        <button class="youtube-local-open" type="button" data-open-youtube="${esc(id)}" data-open-kind="${isList?"list":"video"}">Open on YouTube</button>
+      </div>`;
+      ytHint.textContent="Local file detected — playback needs HTTPS or localhost.";
+    }else{
+      ytLocalFallback.classList.remove("show");
+      ytLocalFallback.innerHTML="";
+      ytPlayer.style.display="block";
+      ytPlayer.src=isList
+        ?`https://www.youtube.com/embed/videoseries?list=${encodeURIComponent(id)}&rel=0&autoplay=1&playsinline=1&origin=${encodeURIComponent(location.origin)}`
+        :`https://www.youtube.com/embed/${encodeURIComponent(id)}?rel=0&autoplay=1&playsinline=1&origin=${encodeURIComponent(location.origin)}`;
     }
-    if(searchRonflixBox)searchRonflixBox.classList.remove("show");
-    if(searchRonflixBar)searchRonflixBar.classList.remove("show");
-    setSearchRonflixStatus("");
-  }
 
-  async function startSearchRonflix(id,title){
-    if(!searchRonflixVideo || !window.RonflixStream){
-      setSearchRonflixStatus("RonFlix server client load nahi hua. Page reload karke dobara try karo.");
-      return;
-    }
-    stopSearchRonflix();
-    const seq=++searchRonflixSeq;
-    const ctrl=new AbortController();
-    searchRonflixCtrl=ctrl;
-    if(searchRonflixBox)searchRonflixBox.classList.add("show");
-    ytLocalFallback.classList.remove("show");
-    ytLocalFallback.innerHTML="";
-    searchRonflixVideo.style.display="none";
-    setSearchRonflixStatus("RonFlix: fetching stream…");
-    try{
-      const stream=await window.RonflixStream.getVideoStream(id,{signal:ctrl.signal,timeoutMs:12000});
-      if(seq!==searchRonflixSeq||ctrl.signal.aborted)return;
-      searchRonflixVideo.src=stream.url;
-      searchRonflixVideo.defaultPlaybackRate=searchRonflixSpeed;
-      searchRonflixVideo.playbackRate=searchRonflixSpeed;
-      setSearchRonflixStatus("RonFlix: stream found — preparing video…");
-      await new Promise((resolve,reject)=>{
-        const timer=setTimeout(()=>reject(new Error("stream timeout")),30000);
-        const loaded=()=>{clearTimeout(timer);cleanup();resolve();};
-        const failed=()=>{clearTimeout(timer);cleanup();reject(new Error("stream failed to load (possibly CORS blocked)"));};
-        const cleanup=()=>{searchRonflixVideo.removeEventListener("loadedmetadata",loaded);searchRonflixVideo.removeEventListener("error",failed);};
-        searchRonflixVideo.addEventListener("loadedmetadata",loaded,{once:true});
-        searchRonflixVideo.addEventListener("error",failed,{once:true});
-        searchRonflixVideo.load();
-      });
-      if(seq!==searchRonflixSeq||ctrl.signal.aborted)return;
-      searchRonflixVideo.style.display="block";
-      setSearchRonflixStatus("");
-      if(searchRonflixBar)searchRonflixBar.classList.add("show");
-      const p=searchRonflixVideo.play();
-      if(p&&p.catch)p.catch(()=>{});
-    }catch(error){
-      if(seq!==searchRonflixSeq||ctrl.signal.aborted)return;
-      console.warn("YT Search RonFlix:",error);
-      setSearchRonflixStatus("RonFlix failed: "+(error.message||"stream unavailable")+". Try another video or retry.");
-    }
+    const top=ytPlayerCard.getBoundingClientRect().top+window.scrollY-12;
+    window.scrollTo({top,behavior:(window.innerWidth>=769?"auto":"smooth")});
   }
 
   function play(id,title="YouTube video"){
     if(!/^[A-Za-z0-9_-]{11}$/.test(id||""))return;
     searchPlayId=id; searchPlayTitle=title; searchPlayKind="video";
-    ytNow.textContent=title;
-    ytPlayerCard.classList.add("show");
-    ytLocalFallback.classList.remove("show");
-    ytLocalFallback.innerHTML="";
     rememberWatched(id,title,"video");
-    startSearchRonflix(id,title);
-    const top=ytPlayerCard.getBoundingClientRect().top+window.scrollY-12;
-    window.scrollTo({top,behavior:(window.innerWidth>=769?"auto":"smooth")});
+    playYouTubeEmbed(id,title,false);
   }
 
   function playPlaylist(id,title="YouTube playlist"){
     if(!/^[A-Za-z0-9_-]{10,}$/.test(id||""))return;
     searchPlayId=id; searchPlayTitle=title; searchPlayKind="list";
-    ytNow.textContent=title;
-    ytPlayerCard.classList.add("show");
-    stopSearchRonflix();
-    ytLocalFallback.classList.add("show");
-    ytLocalFallback.innerHTML=`<div class="youtube-local-box">
-      <img src="${PLAYLIST_THUMB}" alt="">
-      <div class="youtube-local-title">RonFlix individual video playback</div>
-      <div class="youtube-local-text">RonFlix server direct playback is available for individual videos. Search a topic and select a video result instead of a playlist.</div>
-    </div>`;
-    ytHint.textContent="RonFlix direct playback supports individual videos; playlist playback is not available in this tab.";
-    const top=ytPlayerCard.getBoundingClientRect().top+window.scrollY-12;
-    window.scrollTo({top,behavior:(window.innerWidth>=769?"auto":"smooth")});
+    rememberWatched(id,title,"list");
+    playYouTubeEmbed(id,title,true);
   }
 
   async function pipedRequest(path,params={}){
@@ -381,7 +327,11 @@
   }
 
   function stopPlayer(){
-    stopSearchRonflix();
+    hasActivePlayer=false;
+    if(ytPlayer){
+      ytPlayer.removeAttribute("src");
+      ytPlayer.style.display="none";
+    }
     ytPlayerCard.classList.remove("show");
     searchPlayId="";
   }
@@ -409,20 +359,6 @@
     localStorage.removeItem(YOUTUBE_WATCH_HISTORY_KEY);
     renderRecent();
   });
-
-  document.querySelectorAll("[data-yt-search-speed]").forEach(btn=>btn.addEventListener("click",()=>{
-    searchRonflixSpeed=parseFloat(btn.dataset.ytSearchSpeed)||1;
-    document.querySelectorAll("[data-yt-search-speed]").forEach(item=>item.classList.toggle("active",item===btn));
-    if(searchRonflixVideo){searchRonflixVideo.defaultPlaybackRate=searchRonflixSpeed;searchRonflixVideo.playbackRate=searchRonflixSpeed;}
-  }));
-  searchRonflixPip?.addEventListener("click",async()=>{
-    if(!searchRonflixVideo?.src)return;
-    try{
-      if(document.pictureInPictureElement===searchRonflixVideo)await document.exitPictureInPicture();
-      else await searchRonflixVideo.requestPictureInPicture();
-    }catch(_){if(typeof showToast==="function")showToast("RonFlix PiP browser mein supported nahi hai.","info");}
-  });
-  document.querySelectorAll("[data-yt-search-speed]").forEach(btn=>btn.classList.toggle("active",btn.dataset.ytSearchSpeed==="1"));
 
   ytBtn.addEventListener("click",submit);
   ytInput.addEventListener("keydown",e=>{if(e.key==="Enter")submit();});
