@@ -115,6 +115,28 @@ vm.runInContext(fs.readFileSync('js/features/ronflix-player.js', 'utf8'), contex
   toggle.click();
   assert.equal(toggle.textContent, '◈ RonFlix');
   assert.deepEqual(calls.at(-1), { type: 'video', id: videoId }, 'playlist item must return to the same normal video');
+
+  // Public mirrors can return bot-block errors or expire their media URLs. In
+  // that case RonFlix mode must stay usable by handing playback to the proven
+  // YouTube iframe instead of disabling itself.
+  window.RonflixStream.getVideoStream = async () => {
+    streamCalls += 1;
+    throw new Error('mirror blocked playback');
+  };
+  iframe.style.display = 'none';
+  toggle.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(streamCalls, 3);
+  assert.equal(window.ytRonflixGetState().enabled, true, 'a mirror failure must not disable RonFlix mode');
+  assert.equal(window.ytRonflixGetState().active, true, 'YouTube fallback must count as active playback');
+  assert.equal(nativeVideo.style.display, 'none', 'failed native media must be hidden');
+  assert.equal(iframe.style.display, 'block', 'YouTube fallback must be visible');
+  assert.equal(toggle.textContent, '◈ RonFlix ON');
+  assert.match(iframe.querySelector('iframe').src, new RegExp(videoId));
+
+  toggle.click();
+  assert.equal(window.ytRonflixGetState().enabled, false);
+  assert.equal(toggle.textContent, '◈ RonFlix');
   console.log('ronflix toggle harness passed');
   process.exit(0);
 })().catch((error) => {

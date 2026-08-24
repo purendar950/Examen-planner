@@ -23,6 +23,7 @@
   var ronflixPreviousSpeed = null;
   var normalRestoreSeq = 0;
   var ronflixPreviousPiP = null;
+  var ronflixFallbackActive = false;
 
   function validId(id) { return /^[A-Za-z0-9_-]{11}$/.test(String(id || '')); }
   function currentId() {
@@ -50,6 +51,9 @@
   }
   function isActive() {
     return !!(ronflixActiveNow && ronflixVideo && ronflixVideo.style.display !== 'none');
+  }
+  function isPlaybackActive() {
+    return isActive() || ronflixFallbackActive;
   }
   function setStatus(message) {
     var el = document.getElementById('yt-ronflix-status');
@@ -185,6 +189,7 @@
     if (ronflixAbort) { try { ronflixAbort.abort(); } catch (e) {} }
     ronflixAbort = null;
     ronflixActiveNow = false;
+    ronflixFallbackActive = false;
     updateToggleUi();
     ronflixWatchLastTs = 0;
     flushWatchTime();
@@ -259,7 +264,7 @@
     if (ronflixAbort) { try { ronflixAbort.abort(); } catch (e) {} }
     ronflixAbort = null;
     ronflixActiveNow = false;
-    ronflixEnabled = false;
+    ronflixFallbackActive = true;
     updateToggleUi();
     if (ronflixVideo) {
       try { ronflixVideo.pause(); } catch (e) {}
@@ -272,7 +277,9 @@
     if (iframe) iframe.style.display = 'block';
     var placeholder = document.getElementById('yt-placeholder');
     if (placeholder) placeholder.style.display = 'none';
-    showToastSafe('RonFlix unavailable — normal player use kar rahe hain.' + (reason ? ' ' + reason : ''), 'info');
+    showSourceBadge('youtube');
+    showToastSafe('RonFlix mirror unavailable — YouTube player se play ho raha hai.' +
+      (reason ? ' ' + reason : ''), 'info');
     restoreNormalPlayer('video', id);
   }
 
@@ -291,6 +298,7 @@
     ronflixId = id;
     ronflixTitle = title || currentTitle();
     ronflixActiveNow = false;
+    ronflixFallbackActive = false;
     updateToggleUi();
     normalRestoreSeq += 1;
     try {
@@ -351,12 +359,12 @@
           if (seq !== ronflixSeq || !ronflixEnabled || ctrl.signal.aborted) return;
           try { if (resume > 0) video.currentTime = resume; } catch (e) {}
           ronflixActiveNow = true;
+          video.style.display = 'block';
           updateToggleUi();
           ronflixWatchLastTs = Date.now();
           ronflixLastSave = Date.now();
           setButtonLoading(false);
           setStatus('');
-          video.style.display = 'block';
           showSourceBadge('ronflix');
           var play = video.play();
           if (play && play.catch) {
@@ -409,7 +417,7 @@
   function updateToggleUi() {
     var button = document.getElementById('yt-ronflix-toggle');
     if (!button) return;
-    var active = !!(ronflixEnabled && ronflixActiveNow);
+    var active = !!(ronflixEnabled && isPlaybackActive());
     var hasVideo = !!validId(currentId());
     button.classList.toggle('on', active);
     button.textContent = active ? '\u25c8 RonFlix ON' : (hasVideo ? '\u25c8 RonFlix' : '\u25c8 RonFlix (load video first)');
@@ -417,7 +425,9 @@
     button.style.opacity = (!hasVideo && !active) ? '0.5' : '';
     button.setAttribute('aria-pressed', active ? 'true' : 'false');
     button.title = active
-      ? 'RonFlix ON — native playback through the stream mirror. Click to turn off.'
+      ? (ronflixFallbackActive
+        ? 'RonFlix ON — YouTube fallback is playing because the mirror was unavailable. Click to turn off.'
+        : 'RonFlix ON — native playback through the stream mirror. Click to turn off.')
       : hasVideo
         ? 'RonFlix — click to play this video through the RonFlix server.'
         : 'Load a video first, then click RonFlix to switch playback.';
@@ -454,12 +464,13 @@
     } else {
       reloadCurrent();
     }
-    showToastSafe(next ? '◈ RonFlix ON — native stream player' : 'RonFlix OFF — normal player', next ? 'success' : 'info');
+    showToastSafe(next ? '◈ RonFlix ON — trying the mirror first' : 'RonFlix OFF — normal player',
+      next ? 'success' : 'info');
   }
 
   window.ytToggleRonflix = function () { setEnabled(!ronflixEnabled); };
   window.ytRonflixGetState = function () {
-    return { enabled: ronflixEnabled, active: isActive(), videoId: ronflixId, title: ronflixTitle };
+    return { enabled: ronflixEnabled, active: isPlaybackActive(), videoId: ronflixId, title: ronflixTitle };
   };
 
   function maybeAutoEnable() {
