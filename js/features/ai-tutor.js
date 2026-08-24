@@ -7994,7 +7994,12 @@
       };
       var savedBtn = document.getElementById('ai-notes-saved');
       if (savedBtn) savedBtn.onclick = function () {
-        if (window.NotesLibrary) window.NotesLibrary.openModal();
+        var videoId = curVid();
+        if (!videoId) {
+          if (typeof showToast === 'function') showToast('Play a video first to see its saved notes.', 'error');
+          return;
+        }
+        if (window.NotesLibrary) window.NotesLibrary.openModal(videoId);
       };
       // A freshly built body has no notes yet, so the setup controls start open.
       setSetupCollapsed(false);
