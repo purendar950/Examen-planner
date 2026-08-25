@@ -47,10 +47,14 @@
   var _accessRetryCount = 0;
   var _accessRequestInFlight = false;
   var _sending = false;
+  // Abort handle for the request in flight, plus a flag saying the user asked to
+  // stop (as opposed to a timeout or transport failure) so the terminal paths can
+  // tell the difference. _chatOperation gates the Stop button: only the text-chat
+  // path can actually be cancelled, so it is never offered for media jobs.
   var _chatAbort = null;
   var _generationStopped = false;
-  var _thinkingLabel = '';   // phase text shown in the animated pending bubble
   var _chatOperation = '';
+  var _thinkingLabel = '';   // phase text shown in the animated pending bubble
   // Only one optional tool panel may be open at a time. The active panel is
   // moved into the universal composer instead of rendering as a separate page-wide box.
   var _activeComposerTool = '';
@@ -564,11 +568,16 @@
     .aic-hint{flex:1;color:var(--muted);font-size:.64rem;}
     .aic-send{display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:32px;padding:0 11px;border:0;border-radius:9px;background:var(--accent);color:#17130e;font-size:.78rem;font-weight:800;cursor:pointer;transition:transform .16s ease-out,opacity .16s ease-out;}
     .aic-send:hover{transform:translateY(-1px);}.aic-send:active{transform:scale(.97);}.aic-send:disabled{opacity:.5;cursor:default;transform:none;}
-    .aic-stop{display:inline-flex;align-items:center;justify-content:center;height:32px;padding:0 11px;border:1px solid rgba(197,75,67,.45);border-radius:9px;background:rgba(197,75,67,.08);color:#c54b43;font:inherit;font-size:.76rem;font-weight:800;cursor:pointer;animation:aic-rise .18s ease-out both;transition:background .16s ease-out,transform .16s ease-out;}
     /* A sheen on the disabled Send button keeps "Sending…" visibly alive. */
     .aic-send.is-sending{position:relative;overflow:hidden;opacity:.72;}
     .aic-send.is-sending::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.5),transparent);transform:translateX(-100%);animation:aic-yt-sheen 1.25s linear infinite;}
-    .aic-stop:hover{background:rgba(197,75,67,.13);}.aic-stop[hidden]{display:none;}
+    /* Stop sits beside Send only while a cancellable request is in flight. */
+    .aic-stop{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 11px;border:1px solid color-mix(in srgb,#c54b43 42%,var(--border));border-radius:9px;background:color-mix(in srgb,#c54b43 12%,var(--surface));color:#c54b43;font:inherit;font-size:.78rem;font-weight:800;cursor:pointer;transition:transform .16s ease-out,background .16s ease-out;animation:aic-rise .18s ease-out both;}
+    .aic-stop:hover{background:color-mix(in srgb,#c54b43 20%,var(--surface));transform:translateY(-1px);}
+    .aic-stop:active{transform:scale(.97);}
+    .aic-stop[hidden]{display:none;}
+    .aic-stop-icon{flex:0 0 auto;width:9px;height:9px;border-radius:2px;background:currentColor;animation:aic-stop-pulse 1.1s ease-in-out infinite;}
+    @keyframes aic-stop-pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
     .aic-file-input{display:none;}
     .aic-persona-box,.aic-image-box,.aic-github-box,.aic-media-box{padding:.8rem 1.25rem;border-bottom:1px solid color-mix(in srgb,var(--border) 65%,transparent);background:color-mix(in srgb,var(--surface) 70%,var(--card));}
     .aic-persona-label,.aic-image-label,.aic-github-label{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;color:var(--muted);font-size:.7rem;}
@@ -577,7 +586,7 @@
     @keyframes aic-rise{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
     @media (max-width:820px){.aic-shell{grid-template-columns:205px minmax(0,1fr);height:100%;border-radius:14px;}.aic-side{width:auto;}.aic-head{align-items:flex-start;flex-direction:column;padding:.8rem .9rem;}.aic-head-controls{width:100%;flex-wrap:wrap;}.aic-model-wrap{flex:1 1 100%;}.aic-model-wrap .aic-select{flex:1;max-width:none;}.aic-quick-actions{overflow-x:auto;padding:.5rem .9rem;}.aic-log{padding-top:1.5rem;}.aic-msg-row.user .aic-msg{max-width:86%;}.aic-hint{display:none;}}
     @media (max-width:560px){.aic-shell{grid-template-columns:1fr;min-height:0;height:100%;}.aic-side{display:none;}.aic-head{flex-direction:row;align-items:center;}.aic-head-left{flex:1;}.aic-head-controls{width:auto;}.aic-head-controls .aic-model-wrap,.aic-head-controls .aic-select,.aic-head-controls .aic-control-label{display:none;}.aic-log{padding-left:1rem;padding-right:1rem;}.aic-form{padding-left:.75rem;padding-right:.75rem;}.aic-quick-actions{padding-left:.75rem;padding-right:.75rem;}.aic-msg{font-size:.88rem;}}
-    @media (prefers-reduced-motion:reduce){.aic-msg-row,.aic-new-btn,.aic-send,.aic-stop{animation:none;transition:none;}.aic-thinking,.aic-thinking-dots i,.aic-stream-caret,.aic-send.is-sending::after{animation:none;}.aic-thinking-dots i{opacity:1;transform:none;}}
+    @media (prefers-reduced-motion:reduce){.aic-msg-row,.aic-new-btn,.aic-send,.aic-stop{animation:none;transition:none;}.aic-thinking,.aic-thinking-dots i,.aic-stream-caret,.aic-stop-icon,.aic-send.is-sending::after{animation:none;}.aic-thinking-dots i{opacity:1;transform:none;}}
   `;
   document.head.appendChild(st);
 
@@ -617,7 +626,7 @@
       <button class="aic-icon-btn" onclick="aicToggleGithubBox()" title="Add read-only GitHub repository context">GitHub</button>
       <button class="aic-icon-btn" id="aic-image-btn" onclick="aicToggleImageBox()" title="Generate an image" style="display:none;">▧ Image</button><button class="aic-icon-btn" id="aic-search-btn" onclick="aicToggleSearchBox()" title="Search the web" style="display:none;">⌕ Search</button><button class="aic-icon-btn" id="aic-speech-btn" onclick="aicToggleSpeechBox()" title="Read text aloud" style="display:none;">♬ Speak</button><button class="aic-icon-btn" id="aic-video-btn" onclick="aicToggleVideoBox()" title="Generate a video" style="display:none;">▣ Video</button>
       <span class="aic-quick-spacer"></span>
-      <span class="aic-control-label">Enter to send · Shift + Enter for a new line</span>
+      <span class="aic-control-label">Enter to send · Shift + Enter for a new line · Esc to stop</span>
     </div>
     <div class="aic-persona-box" id="aic-persona-box" style="display:none;">
       <div class="aic-persona-label"><span>Custom instructions for this chat</span><button class="aic-icon-btn" type="button" style="padding:3px 7px;" onclick="aicSavePersona()">Save</button></div>
@@ -660,7 +669,7 @@
     <form class="aic-form">
       <button class="aic-jump-latest" id="aic-jump-latest" type="button" hidden onclick="aicScrollToLatest()">↓ Latest</button>
       <input type="file" id="aic-file-input" class="aic-file-input" accept=".txt,.md,.pdf" onchange="aicFileSelected(event)">
-      <div class="aic-composer"><div class="aic-composer-toolbox" id="aic-composer-toolbox" aria-live="polite"></div><textarea class="aic-input" id="aic-input" rows="1" placeholder="Message AI Chat…"></textarea>      <div class="aic-composer-bottom"><div class="aic-composer-tools"><button type="button" class="aic-composer-tool" id="aic-attach-btn" onclick="document.getElementById('aic-file-input').click()" title="Attach a file" style="display:none;">＋ Attach</button><button type="button" class="aic-composer-tool" id="aic-composer-youtube-btn" onclick="aicToggleYoutubeBox()" title="Attach a YouTube video's transcript">▶ YouTube</button><button type="button" class="aic-composer-tool" onclick="aicToggleImageBox()" title="Generate an image">▧ Image</button><button type="button" class="aic-composer-tool" id="aic-composer-search-btn" onclick="aicToggleSearchBox()" title="Search the web" style="display:none;">⌕ Search</button><button type="button" class="aic-composer-tool" id="aic-composer-speech-btn" onclick="aicToggleSpeechBox()" title="Read text aloud" style="display:none;">♬ Speak</button><button type="button" class="aic-composer-tool" id="aic-composer-video-btn" onclick="aicToggleVideoBox()" title="Generate a video" style="display:none;">▣ Video</button></div><span class="aic-hint">Ask for an image, web search, spoken answer, or video anytime.</span><button class="aic-stop" id="aic-stop-btn" type="button" hidden onclick="aicStopGeneration()">■ Stop</button><button class="aic-send" id="aic-send-btn" type="button" aria-label="Send message">↑ Send</button></div></div>
+      <div class="aic-composer"><div class="aic-composer-toolbox" id="aic-composer-toolbox" aria-live="polite"></div><textarea class="aic-input" id="aic-input" rows="1" placeholder="Message AI Chat…"></textarea>      <div class="aic-composer-bottom"><div class="aic-composer-tools"><button type="button" class="aic-composer-tool" id="aic-attach-btn" onclick="document.getElementById('aic-file-input').click()" title="Attach a file" style="display:none;">＋ Attach</button><button type="button" class="aic-composer-tool" id="aic-composer-youtube-btn" onclick="aicToggleYoutubeBox()" title="Attach a YouTube video's transcript">▶ YouTube</button><button type="button" class="aic-composer-tool" onclick="aicToggleImageBox()" title="Generate an image">▧ Image</button><button type="button" class="aic-composer-tool" id="aic-composer-search-btn" onclick="aicToggleSearchBox()" title="Search the web" style="display:none;">⌕ Search</button><button type="button" class="aic-composer-tool" id="aic-composer-speech-btn" onclick="aicToggleSpeechBox()" title="Read text aloud" style="display:none;">♬ Speak</button><button type="button" class="aic-composer-tool" id="aic-composer-video-btn" onclick="aicToggleVideoBox()" title="Generate a video" style="display:none;">▣ Video</button></div><span class="aic-hint">Ask for an image, web search, spoken answer, or video anytime.</span><button class="aic-send" id="aic-send-btn" type="button" aria-label="Send message">↑ Send</button><button class="aic-stop" id="aic-stop-btn" type="button" hidden aria-label="Stop generating" title="Stop generating (Esc)"><span class="aic-stop-icon" aria-hidden="true"></span><span class="aic-stop-label">Stop</span></button></div></div>
 
     </form>
   </main>
@@ -685,13 +694,14 @@
     if (!form || !input || !send || form.dataset.aicSubmissionBound === 'true') return false;
 
     form.dataset.aicSubmissionBound = 'true';
-    var stop = page.querySelector('#aic-stop-btn');
-    if (stop) stop.addEventListener('click', function () { if (typeof window.aicStopGeneration === 'function') window.aicStopGeneration(); });
     send.addEventListener('click', dispatchComposerSend);
     form.addEventListener('submit', dispatchComposerSend);
     input.addEventListener('keydown', function (ev) {
       if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) dispatchComposerSend(ev);
+      else if (ev.key === 'Escape') window.aicStopGeneration(ev);
     });
+    var stop = page.querySelector('#aic-stop-btn');
+    if (stop) stop.addEventListener('click', function (ev) { window.aicStopGeneration(ev); });
     return true;
   }
 
@@ -762,6 +772,7 @@
         send.setAttribute('aria-label', labels[_activeComposerTool] || 'Send message');
       }
     }
+    syncStopButton();
   }
 
   function setComposerTool(kind) {
@@ -861,6 +872,12 @@
     }
     var timeout = Number(options.timeoutMs || 90000);
     var timer = controller ? setTimeout(function () { controller.abort(); }, Math.max(5000, timeout)) : null;
+    // The local controller owns the timeout, so a caller's signal (Stop) has to
+    // be chained into it or it would be dropped by the Object.assign below.
+    if (controller && options.signal) {
+      if (options.signal.aborted) controller.abort();
+      else options.signal.addEventListener('abort', function () { controller.abort(); }, { once: true });
+    }
     var headers = Object.assign({}, options.headers || {});
     if (cfg.transport === 'google_interactions') headers['x-goog-api-key'] = cfg.apiKey;
     else headers.Authorization = 'Bearer ' + cfg.apiKey;
@@ -4152,6 +4169,8 @@
     renderComposerToolbox();
   }
 
+  /* ── pending-state UI: animated "working" bubble + Stop control ── */
+
   // Rendered into the empty assistant bubble so the wait before the first token
   // is visibly a wait, not a silent failure.
   function thinkingHtml(label) {
@@ -4175,9 +4194,9 @@
 
   function setSending(on, operation) {
     _sending = on;
-    if (!on) _thinkingLabel = '';
     _chatOperation = on ? (operation || '') : '';
     if (!on) {
+      _thinkingLabel = '';
       if (_chatAbort) { try { _chatAbort.abort(); } catch (e) {} }
       _chatAbort = null;
       _generationStopped = false;
@@ -4186,23 +4205,39 @@
     if (btn) {
       var labels = { image: 'Generate', search: 'Search', speech: 'Speak', video: 'Generate' };
       btn.disabled = on;
-      btn.textContent = on ? 'Sending…' : (labels[_activeComposerTool] || 'Send');
       btn.classList.toggle('is-sending', !!on);
+      btn.textContent = on ? 'Sending…' : (labels[_activeComposerTool] || 'Send');
       btn.setAttribute('aria-label', on ? 'Sending' : ((labels[_activeComposerTool] || 'Send') + ' message'));
     }
-    var stop = document.getElementById('aic-stop-btn');
-    if (stop) {
-      stop.textContent = '\u25a0 Stop';
-      stop.hidden = !(on && _chatOperation === 'text');
-    }
+    syncStopButton();
   }
 
-  window.aicStopGeneration = function () {
+  // Only the text-chat path threads an abort signal through, so Stop is offered
+  // only there — a visible button that cannot cancel anything is worse than none.
+  function syncStopButton() {
+    var stop = document.getElementById('aic-stop-btn');
+    if (!stop) return;
+    // `hidden` alone controls availability — a display:none button cannot be
+    // clicked. `disabled` is reserved for the transient "Stopping…" state, so it
+    // never leaves a visible Stop button inert.
+    stop.hidden = !(_sending && _chatOperation === 'text');
+    stop.disabled = false;
+    // Write the label, not the button: textContent would delete the icon span.
+    var label = stop.querySelector('.aic-stop-label');
+    if (label) label.textContent = 'Stop';
+  }
+
+  window.aicStopGeneration = function (ev) {
+    if (ev && typeof ev.preventDefault === 'function') ev.preventDefault();
     if (!_sending || !_chatAbort) return;
     _generationStopped = true;
     try { _chatAbort.abort(); } catch (e) {}
     var stop = document.getElementById('aic-stop-btn');
-    if (stop) stop.textContent = 'Stopping…';
+    if (stop) {
+      stop.disabled = true;   // the abort is already in flight; a second click is a no-op
+      var label = stop.querySelector('.aic-stop-label');
+      if (label) label.textContent = 'Stopping…';
+    }
   };
 
   window.aicKeydown = function (ev) {
@@ -4462,6 +4497,7 @@
     }
 
     function paint() {
+      if (settled) return;   // a stopped request must not keep repainting
       if (currentThreadId() !== t.id) return;
       var log = document.getElementById('aic-log');
       var row = log && log.lastElementChild;
@@ -4609,6 +4645,8 @@
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify(body),
         timeoutMs: body.timeoutMs,
+        // PrepPathBackend chains this into its per-attempt timeout controller and
+        // refuses to fail over to another server once the caller has aborted.
         signal: chatAbort && chatAbort.signal
       };
       if (!window.PrepPathBackend || typeof window.PrepPathBackend.fetch !== 'function') {
@@ -4618,6 +4656,8 @@
     }).then(function (r) {
       if (!r.ok || !r.body || !window.TextDecoder) return Promise.reject(new Error('no-stream'));
       var reader = r.body.getReader(), dec = new TextDecoder(), buf = '';
+      // Stop aborts chatAbort, which rejects this read() and lands in the
+      // .catch below, where _generationStopped routes it to finishStopped().
       function pump() {
         return reader.read().then(function (res) {
           if (res.done) {
