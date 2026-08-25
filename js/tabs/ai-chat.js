@@ -376,7 +376,12 @@
     .aic-chip-btn.is-on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--text);}
     .aic-quick-spacer{flex:1;}
     .aic-log{flex:1;min-height:0;overflow-y:auto;width:100%;max-width:none;margin:0;padding:1.1rem clamp(1rem,6vw,5rem) 2rem;scrollbar-width:thin;scroll-behavior:smooth;}
-    .aic-jump-latest{position:absolute;right:clamp(1rem,4vw,2.5rem);bottom:.8rem;z-index:3;display:inline-flex;align-items:center;gap:5px;padding:7px 10px;border:1px solid color-mix(in srgb,var(--border) 90%,transparent);border-radius:999px;background:color-mix(in srgb,var(--surface) 94%,var(--card));color:var(--text);font:inherit;font-size:.7rem;font-weight:750;box-shadow:0 7px 18px rgba(28,24,20,.12);cursor:pointer;}
+    /* Anchored to the top edge of the composer (bottom:100% of .aic-form) and
+       centred, so it floats over the conversation and can never reach the
+       controls. Pinning it to .aic-main's bottom-right instead put it directly
+       on top of #aic-send-btn — it swallowed the click and Send looked dead.
+       The composer also outranks it, so future chrome cannot repeat this. */
+    .aic-jump-latest{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(100% - .35rem);z-index:1;display:inline-flex;align-items:center;gap:5px;padding:7px 10px;border:1px solid color-mix(in srgb,var(--border) 90%,transparent);border-radius:999px;background:color-mix(in srgb,var(--surface) 94%,var(--card));color:var(--text);font:inherit;font-size:.7rem;font-weight:750;box-shadow:0 7px 18px rgba(28,24,20,.12);cursor:pointer;}
     .aic-jump-latest:hover{border-color:var(--accent);}
     .aic-msg-row{display:flex;flex-direction:column;width:min(100%,920px);margin:0 auto .85rem;gap:4px;animation:aic-rise .18s ease-out both;}
     .aic-msg-row + .aic-msg-row{margin-top:.1rem;}
@@ -541,8 +546,12 @@
     .aic-project-progress-tail{max-height:68px;overflow:hidden;margin:8px 0 0;padding:7px 8px;border:1px solid var(--border);border-radius:7px;background:rgba(0,0,0,.16);color:var(--muted);font:10px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-all;}
     @media (max-width:900px){.aic-code-workspace.has-preview{display:block;}.aic-code-workspace.has-preview .aic-workspace-preview{border-left:0;border-top:1px solid var(--border);min-height:320px;}.aic-code-workspace.has-preview .aic-workspace-preview iframe{min-height:320px;}}
     .aic-github-file{display:flex;align-items:center;gap:6px;}.aic-github-file button{margin-left:auto;padding:2px 6px;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--muted);font-size:.62rem;cursor:pointer;}.aic-github-file button:hover{border-color:var(--accent);color:var(--text);}
-    .aic-form{width:100%;max-width:980px;margin:0 auto;padding:.35rem clamp(1rem,4vw,3.5rem) .7rem;}
-    .aic-composer{overflow:hidden;border:1px solid color-mix(in srgb,var(--border) 95%,transparent);border-radius:15px;background:var(--surface);box-shadow:0 8px 28px rgba(28,24,20,.07);transition:border-color .16s ease-out,box-shadow .16s ease-out;}
+    /* Containing block for .aic-jump-latest, so the pill is positioned against
+       the composer rather than the whole main column. */
+    .aic-form{position:relative;width:100%;max-width:980px;margin:0 auto;padding:.35rem clamp(1rem,4vw,3.5rem) .7rem;}
+    /* position+z-index so the composer always wins the hit test against any
+       floating chrome in .aic-form. */
+    .aic-composer{position:relative;z-index:2;overflow:hidden;border:1px solid color-mix(in srgb,var(--border) 95%,transparent);border-radius:15px;background:var(--surface);box-shadow:0 8px 28px rgba(28,24,20,.07);transition:border-color .16s ease-out,box-shadow .16s ease-out;}
     .aic-composer:focus-within{border-color:color-mix(in srgb,var(--accent) 72%,var(--border));box-shadow:0 8px 30px color-mix(in srgb,var(--accent) 12%,transparent);}
     .aic-composer-toolbox{border-bottom:1px solid color-mix(in srgb,var(--border) 65%,transparent);background:color-mix(in srgb,var(--surface) 70%,var(--card));}
     .aic-composer-toolbox:empty{display:none;}
@@ -648,8 +657,8 @@
       <div id="aic-workspace-preview" data-workspace-area="preview" class="aic-workspace-preview"><div class="aic-workspace-preview-label"><span>Live preview</span><span>Sandboxed local scripts</span></div><iframe id="aic-workspace-preview-frame" title="HTML, CSS, and JavaScript live preview" sandbox="allow-scripts"></iframe></div>
     </section>
     <div class="aic-log" id="aic-log" role="log" aria-live="polite" aria-relevant="additions text" aria-label="AI Chat conversation"></div>
-    <button class="aic-jump-latest" id="aic-jump-latest" type="button" hidden onclick="aicScrollToLatest()">↓ Latest</button>
     <form class="aic-form">
+      <button class="aic-jump-latest" id="aic-jump-latest" type="button" hidden onclick="aicScrollToLatest()">↓ Latest</button>
       <input type="file" id="aic-file-input" class="aic-file-input" accept=".txt,.md,.pdf" onchange="aicFileSelected(event)">
       <div class="aic-composer"><div class="aic-composer-toolbox" id="aic-composer-toolbox" aria-live="polite"></div><textarea class="aic-input" id="aic-input" rows="1" placeholder="Message AI Chat…"></textarea>      <div class="aic-composer-bottom"><div class="aic-composer-tools"><button type="button" class="aic-composer-tool" id="aic-attach-btn" onclick="document.getElementById('aic-file-input').click()" title="Attach a file" style="display:none;">＋ Attach</button><button type="button" class="aic-composer-tool" id="aic-composer-youtube-btn" onclick="aicToggleYoutubeBox()" title="Attach a YouTube video's transcript">▶ YouTube</button><button type="button" class="aic-composer-tool" onclick="aicToggleImageBox()" title="Generate an image">▧ Image</button><button type="button" class="aic-composer-tool" id="aic-composer-search-btn" onclick="aicToggleSearchBox()" title="Search the web" style="display:none;">⌕ Search</button><button type="button" class="aic-composer-tool" id="aic-composer-speech-btn" onclick="aicToggleSpeechBox()" title="Read text aloud" style="display:none;">♬ Speak</button><button type="button" class="aic-composer-tool" id="aic-composer-video-btn" onclick="aicToggleVideoBox()" title="Generate a video" style="display:none;">▣ Video</button></div><span class="aic-hint">Ask for an image, web search, spoken answer, or video anytime.</span><button class="aic-stop" id="aic-stop-btn" type="button" hidden onclick="aicStopGeneration()">■ Stop</button><button class="aic-send" id="aic-send-btn" type="button" aria-label="Send message">↑ Send</button></div></div>
 
@@ -4069,7 +4078,17 @@
     var log = document.getElementById('aic-log');
     if (!log) return;
     if (force) _logStuck = true;
-    if (_logStuck) log.scrollTop = log.scrollHeight;
+    if (_logStuck) {
+      log.scrollTop = log.scrollHeight;
+      // .aic-log sets scroll-behavior:smooth, so the assignment above animates
+      // rather than applying synchronously. Re-measuring now would read the
+      // pre-animation offset, decide the log is scrolled away from the bottom,
+      // and re-show the pill we just made redundant. We know we are pinned to
+      // the latest message, so say so directly instead of measuring.
+      var jump = document.getElementById('aic-jump-latest');
+      if (jump) jump.hidden = true;
+      return;
+    }
     updateJumpToLatest();
   }
 
