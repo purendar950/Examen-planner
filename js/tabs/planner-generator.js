@@ -109,8 +109,15 @@ function buildPlanSchedule(cfg, planId) {
       .map((ch, i) => ({ ch, i, ord: Number((chConf[ch.id] || {}).order) || (i + 1) }))
       .sort((a, b) => (a.ord - b.ord) || (a.i - b.i))
       .map(x => x.ch);
+    const chapterNumbers = new Map(pending.map((ch, i) => [ch.id, i + 1]));
     ordered.forEach(ch => {
-      const meta = { ...ch, subName: sub.name, color: sub.color, subId: sub.id };
+      const meta = {
+        ...ch,
+        chapterNo: chapterNumbers.get(ch.id) || Number(ch.chapterNo) || null,
+        subName: sub.name,
+        color: sub.color,
+        subId: sub.id
+      };
       /* Topic-weighted path: when a chapter carries a `topics` array, each
          topic becomes its own slot with effort points derived from its size
          (or the chapter difficulty). This replaces days/gap splitting so hard
@@ -303,7 +310,9 @@ function renderTopicListItems(items, emptyMsg) {
     const sizeBadge = isWeightedTopic && it.sizeLabel
       ? `<span style="font-size:.58rem;padding:1px 5px;border-radius:3px;font-weight:700;${it.sizeLabel==='big'?'background:rgba(239,68,68,.12);color:#ef4444;':it.sizeLabel==='small'?'background:rgba(34,197,94,.12);color:#22c55e;':'background:rgba(245,158,11,.12);color:#f59e0b;'}">${it.sizeLabel==='big'?'B':it.sizeLabel==='small'?'S':'M'}</span>`
       : '';
-    const displayName = isWeightedTopic && it.topic ? `${ch.name} · ${it.topic.name}` : ch.name;
+    const displayName = isWeightedTopic && it.topic
+      ? `${formatChapterName(ch)} · ${it.topic.name}`
+      : formatChapterName(ch);
     const tag = sizeBadge + (isRevise
       ? `<span style="font-size:.6rem;padding:2px 6px;border-radius:4px;background:rgba(168,85,247,.12);color:#A855F7;white-space:nowrap;">${clickable ? '🔁 Revise now' : '🔁 Revise'}</span>`
       : (ch.diff ? `<span style="font-size:.6rem;padding:2px 6px;border-radius:4px;background:var(--card);color:var(--muted);white-space:nowrap;">${escapeHtml(ch.diff)}</span>` : ''));
@@ -323,6 +332,14 @@ function renderTopicListItems(items, emptyMsg) {
         ${tag}
       </div>`;
   }).join('');
+}
+
+function formatChapterName(ch) {
+  const name = (ch && ch.name) || '';
+  const number = Number(ch && ch.chapterNo);
+  return Number.isFinite(number) && number > 0 && !/^chapter\s*\d+/i.test(name)
+    ? `Ch ${number} : ${name}`
+    : name;
 }
 
 function toggleWeightedTopicDone(chId, topicId) {

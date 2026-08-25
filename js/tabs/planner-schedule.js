@@ -54,7 +54,14 @@ function injectRevisionsIntoMap(map, allowedSubs) {
         const dueLabel = date === today
           ? (overdue ? 'overdue' : 'due today')
           : ((state.nextRevisionAt <= today) ? 'rolled over' : 'due ' + date);
-        const meta = { ...ch, subName: sub ? sub.name : (ch.subName || ''), color: sub ? sub.color : (ch.color || '#A855F7'), subId: sub ? sub.id : (ch.subId || '') };
+        const chapterIndex = sub ? sub.chapters.findIndex(item => item.id === ch.id) : -1;
+        const meta = {
+          ...ch,
+          chapterNo: chapterIndex >= 0 ? chapterIndex + 1 : (Number(ch.chapterNo) || null),
+          subName: sub ? sub.name : (ch.subName || ''),
+          color: sub ? sub.color : (ch.color || '#A855F7'),
+          subId: sub ? sub.id : (ch.subId || '')
+        };
         if (!map[date]) map[date] = [];
         map[date].push({ type:'revise', fromEngine:true, ch: meta, dueLabel });
       });
