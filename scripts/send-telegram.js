@@ -22,7 +22,7 @@ const {
   sendTelegramMessageWithKeyboard,
   buildMorningDashboard,
   morningKeyboard,
-} = require('./telegram-dashboard');
+} = require('./telegram-dashboard-v6');
 
 /* ── 1. Validate secrets ──────────────────────────────────────── */
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
