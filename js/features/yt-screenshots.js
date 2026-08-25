@@ -3,7 +3,7 @@
    ──────────────────────────────────────────────────────────────────────────
    Features:
    - Smart visual bookmarks with YouTube frame preview (no base64)
-   - Turbo screenshots sent to Telegram (only file_id stored)
+   - Exact current frames sent to Telegram from YouTube iframe or Turbo
    - Timestamp bookmarks with clickable seek
    - Auto folder structure: Playlist → Video → Moment_N / Bookmark_N
    - Gallery side-panel with tree view + grid view
@@ -179,6 +179,129 @@ function ssGetVideoDuration() {
   return 0;
 }
 
+/* Resolve the actual video loaded inside the YouTube iframe. Playlist mode
+   keeps ytCurrentVideoId as "playlist_<id>", so getVideoData().video_id is the
+   only reliable source for the frame currently visible to the student. */
+function ssGetLiveIframeVideo() {
+  var id = '', title = '';
+  try {
+    if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.getVideoData) {
+      var data = ytPlayer.getVideoData() || {};
+      id = String(data.video_id || '');
+      title = String(data.title || '');
+    }
+  } catch(e) {}
+  if (!id) {
+    try { id = String((typeof ytCurrentVideoId !== 'undefined' && ytCurrentVideoId) || ''); } catch(e) {}
+  }
+  id = id.replace(/^playlist_/, '');
+  if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return null;
+  if (!title) {
+    try { title = String((typeof ytCurrentVideoTitle !== 'undefined' && ytCurrentVideoTitle) || 'YouTube video'); } catch(e) {}
+  }
+  return { videoId: id, title: title || 'YouTube video' };
+}
+
+var ssFrameSendBusy = false;
+
+function ssNewFrameRequestId() {
+  try {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID();
+    }
+    if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
+      var bytes = new Uint8Array(18);
+      window.crypto.getRandomValues(bytes);
+      return 'frame_' + Array.prototype.map.call(bytes, function(value) {
+        return value.toString(16).padStart(2, '0');
+      }).join('');
+    }
+  } catch(e) {}
+  return 'frame_' + Date.now().toString(36) + '_' +
+    Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+}
+
+/* Player-neutral Telegram action. Turbo keeps its fast browser canvas capture;
+   the cross-origin YouTube iframe sends only its live video ID + timestamp to
+   the authenticated backend, which extracts and delivers the exact frame. */
+function ssSendCurrentFrameToTelegram() {
+  try {
+    if (typeof window.ytTurboActive === 'function' && window.ytTurboActive()) {
+      if (typeof window.turboSendToTelegram === 'function') return window.turboSendToTelegram();
+    }
+  } catch(e) {}
+
+  if (typeof ezIsPro === 'function' && !ezIsPro()) {
+    if (typeof ezLockedMsg === 'function') ezLockedMsg('📤 Exact frame to Telegram');
+    else showToast('Exact Telegram frames require Pro.', 'error');
+    return;
+  }
+  if (ssFrameSendBusy) return;
+  var live = ssGetLiveIframeVideo();
+  if (!live) {
+    showToast('Pehle YouTube video load karo.', 'error');
+    return;
+  }
+  var timestamp = Number(ssGetVideoTimestampFloat());
+  if (!isFinite(timestamp) || timestamp < 0) {
+    showToast('Current video time read nahi ho saka.', 'error');
+    return;
+  }
+  if (!window.PrepPathBackend || typeof window.PrepPathBackend.fetch !== 'function') {
+    showToast('Backend routing unavailable — app reload karo.', 'error');
+    return;
+  }
+
+  var button = document.getElementById('ss-tg-frame');
+  var requestId = ssNewFrameRequestId();
+  ssFrameSendBusy = true;
+  if (button) { button.disabled = true; button.dataset.busy = '1'; button.textContent = '⏳ Sending…'; }
+  showToast('📸 Current frame nikaal kar Telegram par bhej rahe hain…', 'info');
+
+  Promise.all([
+    getFirebaseIdToken(),
+    window.PrepPathBackend.selectServer('media')
+  ]).then(function(values) {
+    var token = values[0];
+    var owner = values[1];
+    return window.PrepPathBackend.fetch('/send-current-frame', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({
+        videoId: live.videoId,
+        timestamp: timestamp,
+        requestId: requestId
+      }),
+      timeoutMs: 95000,
+      backendRoute: 'media',
+      backendServerId: owner.id
+    });
+  }).then(function(response) {
+    return response.json().catch(function() { return {}; }).then(function(data) {
+      if (!response.ok || !data.ok) throw new Error(data.error || data.detail || ('HTTP ' + response.status));
+      return data;
+    });
+  }).then(function(result) {
+    var frameTime = Number(result.timestamp);
+    if (!isFinite(frameTime) || frameTime < 0) frameTime = timestamp;
+    var frameTitle = result.title || live.title;
+    if (result.fileId) {
+      ssSaveTelegramMoment(result.fileId, {
+        videoId: result.videoId || live.videoId,
+        title: frameTitle,
+        timestamp: frameTime,
+        source: 'frame-telegram'
+      });
+    }
+    showToast('✅ Exact frame Telegram par bhej diya!', 'success');
+  }).catch(function(error) {
+    showToast('❌ Frame nahi bhej paye: ' + ((error && error.message) || 'unknown error'), 'error');
+  }).then(function() {
+    ssFrameSendBusy = false;
+    if (button) { button.disabled = false; delete button.dataset.busy; button.innerHTML = '📤 Telegram Frame'; }
+  });
+}
+
 function ssFormatTime(secs) {
   if (!secs || secs <= 0) return '0:00';
   const h = Math.floor(secs / 3600);
@@ -297,6 +420,44 @@ function ssCapture() {
   ssRenderGallery();
   ssRenderNotesPage();
   ssUpdateBadge();
+  return true;
+}
+
+/* Persist a Telegram-hosted exact frame without putting image bytes in
+   Firestore. Both normal iframe extraction and Turbo canvas capture call this,
+   so Gallery/Analysis use one format and one numbering path. */
+function ssSaveTelegramMoment(fileId, options) {
+  if (!fileId) return false;
+  var opts = options || {};
+  var ctx = ssGetCurrentContext();
+  var videoId = String(opts.videoId || ctx.videoId || '').replace(/^playlist_/, '');
+  if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return false;
+  var timestamp = Math.max(0, Math.floor(Number(opts.timestamp) || 0));
+  var title = String(opts.title || ctx.videoName || 'Video');
+  ctx.videoId = videoId;
+  ctx.videoName = title;
+
+  var videoFolder = ssEnsureFolder(ctx);
+  var num = ssCountType(videoFolder, 'screenshot') + 1;
+  videoFolder.items.push({
+    id: 'tg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    type: 'screenshot',
+    number: num,
+    timestamp: timestamp,
+    timeLabel: ssFormatTime(timestamp),
+    tgFileId: fileId,
+    imageUrl: ssFrameUrl(videoId, timestamp, ssGetVideoDuration()),
+    videoId: videoId,
+    videoTitle: title,
+    createdAt: Date.now(),
+    label: 'Moment_' + num,
+    source: opts.source || 'frame-telegram'
+  });
+  ssSave();
+  ssRenderGallery();
+  ssRenderNotesPage();
+  ssUpdateBadge();
+  ssShowNotify('📸 Exact Moment_' + num + ' saved at ' + ssFormatTime(timestamp));
   return true;
 }
 
@@ -694,13 +855,14 @@ function ssDownload(playlistId, videoId, itemId) {
   var src = item.imageUrl || '';
   /* tgFileId items: fetch the real Telegram photo via the authenticated proxy. */
   if (item.tgFileId) {
-    src = '';
-    if (typeof TURBO_PROXY !== 'undefined' && TURBO_PROXY) {
-      src = TURBO_PROXY + '/telegram/photo?file_id=' + encodeURIComponent(item.tgFileId);
-    }
-    if (!src) { showToast('Turbo proxy URL not configured — cannot download Telegram screenshot.', 'error'); return; }
+    var photoPath = '/tg-photo?file_id=' + encodeURIComponent(item.tgFileId);
     getFirebaseIdToken().then(function(token) {
-      return fetch(src, { headers: { Authorization: 'Bearer ' + token } });
+      if (!window.PrepPathBackend || typeof window.PrepPathBackend.fetch !== 'function') {
+        throw new Error('Backend routing unavailable');
+      }
+      return window.PrepPathBackend.fetch(photoPath, {
+        headers: { Authorization: 'Bearer ' + token }
+      });
     }).then(function(r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.blob();
@@ -1319,6 +1481,9 @@ function ssInit() {
     toolbar.innerHTML = `
       <button class="ss-capture-btn" onclick="ssCapture()" title="Save this moment — a replayable timestamp and preview frame">
         <span aria-hidden="true">＋</span> Save Moment
+      </button>
+      <button class="ss-capture-btn" id="ss-tg-frame" onclick="ssSendCurrentFrameToTelegram()" title="Send the exact current video frame to your linked Telegram">
+        📤 Telegram Frame
       </button>
       <button class="ss-gallery-btn" onclick="ssTogglePanel()" title="Open the full gallery for this course or playlist">
         Gallery <span class="ss-badge" id="ss-badge-count" style="display:none">0</span>

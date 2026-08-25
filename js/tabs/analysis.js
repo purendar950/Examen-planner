@@ -38,8 +38,8 @@ function anIndexSubjects(){
 }
 
 /* ════════ GALLERY: derive moments from appState.ytScreenshots ════════
-   Turbo screenshots (source === 'turbo-telegram') get their OWN sub-tab, so we
-   keep them in a separate list (AN_SHOTS) and exclude them from the Gallery. */
+   Exact Telegram frames get their OWN sub-tab, so we keep them in a separate
+   list (AN_SHOTS) and exclude them from the visual-bookmark Gallery. */
 let AN_MOMENTS = [];   // gallery moments (everything EXCEPT Turbo screenshots)
 let AN_SHOTS = [];     // Turbo/Telegram screenshots only
 function anBuildMoments(){
@@ -69,9 +69,9 @@ function anBuildMoments(){
   });
 }
 
-/* A "shot" = captured in Turbo OR uploaded to the bot — both live in the
-   dedicated 📸 Screenshots tab, not the Gallery. */
-function anIsShotSrc(s){ return s === 'turbo-telegram'; }   /* uploads now live in their own Uploads tab */
+/* A "shot" = exact frame delivered through Telegram (legacy Turbo records
+   retain their old source name). Uploads live in their own Uploads tab. */
+function anIsShotSrc(s){ return s === 'frame-telegram' || s === 'turbo-telegram'; }
 /* Gallery shows everything EXCEPT those shots. */
 function anGalleryItems(v){ return (v && v.items ? v.items : []).filter(it => !anIsShotSrc(it.source)); }
 function anGalleryEmpty(){ return `<div class="an-empty"><div class="em">🗂️</div><div>No saved moments yet.<br>Capture some from the YouTube tab and they'll appear here.</div></div>`; }

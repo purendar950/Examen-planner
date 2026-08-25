@@ -620,15 +620,16 @@
   }
 
   /* ══════════════════════════════════════════════
-     SCREENSHOT → TELEGRAM  (Turbo-only)
+     SCREENSHOT → TELEGRAM  (Turbo canvas path)
      ──────────────────────────────────────────────
      Turbo plays a NATIVE <video>, so — unlike the cross-origin YouTube iframe —
      we can paint the exact current frame onto a <canvas> and read the pixels
      back. We then POST that JPEG to the bot server, which relays it to the
      user's connected Telegram chat via sendPhoto.
 
-     Only usable while Turbo is actually on screen (turboActive()); in iframe
-     mode there is no readable frame, so the button is hidden entirely.
+     This function remains Turbo-specific, while the player-neutral action in
+     yt-screenshots.js delegates here whenever Turbo is active. Normal iframe
+     mode uses authenticated server-side frame extraction instead.
   ══════════════════════════════════════════════ */
 
   /* mm:ss / h:mm:ss for the caption timecode. */
@@ -688,7 +689,7 @@
     var title = (typeof ytCurrentVideoTitle !== 'undefined' && ytCurrentVideoTitle) ? ytCurrentVideoTitle : 'YouTube video';
     var caption = '📸 <b>' + turboEsc(title) + '</b>\n⏱ ' + turboFmtTs(t) + '  ·  ⚡ Turbo';
 
-    var btn = document.getElementById('yt-turbo-tg');
+    var btn = document.getElementById('ss-tg-frame');
     if (btn) { btn.disabled = true; btn.dataset.busy = '1'; }
     if (typeof showToast === 'function') showToast('📤 Telegram par bhej rahe hain…', 'info');
 
@@ -718,7 +719,14 @@
           if (typeof showToast === 'function') showToast('✅ Screenshot Telegram par bhej diya!', 'success');
           // Save a lightweight moment (only the Telegram file_id, no image
           // bytes) so it shows up in the Gallery / Analysis tab.
-          if (res.fileId) turboSaveMoment(res.fileId, t, title);
+          if (res.fileId && typeof ssSaveTelegramMoment === 'function') {
+            ssSaveTelegramMoment(res.fileId, {
+              timestamp: t,
+              title: title,
+              videoId: turboVid || (typeof ytCurrentVideoId !== 'undefined' ? ytCurrentVideoId : ''),
+              source: 'frame-telegram'
+            });
+          }
         } else {
           if (typeof showToast === 'function') showToast('❌ Nahi bhej paye: ' + ((res && res.error) || 'unknown'), 'error');
         }
@@ -731,63 +739,6 @@
       });
   }
   window.turboSendToTelegram = turboSendToTelegram;
-
-  /* Persist a captured screenshot as a gallery "moment" WITHOUT storing image
-     bytes — we keep only the Telegram file_id and point the thumbnail at the
-     proxy's /tg-photo streamer. Reuses the existing yt-screenshots store, so
-     the moment automatically appears in the YouTube gallery AND the Analysis →
-     Gallery tab (same folder structure: Playlist → Video → Moment). */
-  function turboSaveMoment(fileId, ts, title) {
-    try {
-      if (!fileId || typeof ssGetState !== 'function') return;
-
-      /* Use turboVid — the id of the video actually playing in Turbo — as the
-         source of truth. ytCurrentVideoId is NOT reliable here because Turbo's
-         entry paths can bypass the loader that sets it, so ssGetCurrentContext()
-         would return 'unknown' and the moment would never save. */
-      var vid = String(turboVid || '').replace('playlist_', '');
-      if (!vid && typeof ytCurrentVideoId !== 'undefined' && ytCurrentVideoId) {
-        vid = String(ytCurrentVideoId).replace('playlist_', '');
-      }
-      if (!vid) return;
-
-      var vname = title || turboVidTitle
-        || ((typeof ytCurrentVideoTitle !== 'undefined' && ytCurrentVideoTitle) ? ytCurrentVideoTitle : 'Video');
-
-      /* Best-effort playlist grouping (doesn't matter for the flat Screenshots
-         tab, but keeps the gallery folder structure consistent). */
-      var plId = 'general', plName = 'General';
-      if (typeof ytCurrentPlaylistId !== 'undefined' && ytCurrentPlaylistId) { plId = ytCurrentPlaylistId; plName = 'Playlist'; }
-      else if (typeof ytoCurrentPl !== 'undefined' && ytoCurrentPl) { plId = ytoCurrentPl; plName = 'Course'; }
-
-      var state = ssGetState();
-      if (!state.folders[plId]) state.folders[plId] = { name: plName, videos: {} };
-      var folder = state.folders[plId];
-      if (!folder.videos[vid]) folder.videos[vid] = { name: vname, items: [] };
-      var vf = folder.videos[vid];
-      if (vname && (vf.name === 'Video' || vf.name === 'Unknown Video')) vf.name = vname;
-
-      var num = vf.items.filter(function (i) { return i.type === 'screenshot'; }).length + 1;
-      vf.items.push({
-        id: 'tg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-        type: 'screenshot',
-        number: num,
-        timestamp: ts,
-        timeLabel: turboFmtTs(ts),
-        // Telegram's opaque file reference is kept; the app retrieves it with
-        // a Firebase-authenticated request when rendering the thumbnail.
-        tgFileId: fileId,
-        videoId: vid,
-        videoTitle: vname,
-        createdAt: Date.now(),
-        label: 'Moment_' + num,
-        source: 'turbo-telegram'
-      });
-      if (typeof ssSave === 'function') ssSave();
-      if (typeof ssRenderGallery === 'function') ssRenderGallery();
-      if (typeof ssUpdateBadge === 'function') ssUpdateBadge();
-    } catch (e) {}
-  }
 
   /* ══════════════════════════════════════════════
      UI — toggle button + speed-bar tidy-up
@@ -982,18 +933,12 @@
     bar.querySelectorAll('.yt-speed-btn').forEach(function (b) {
       b.style.display = parseFloat(b.dataset.rate) <= 2 ? '' : 'none';
     });
-
-    var tgBtn = document.getElementById('yt-turbo-tg');
-    if (tgBtn) tgBtn.style.display = turboEnabled ? '' : 'none';
   }
 
   function initUI() {
     var bar = document.getElementById('yt-speed-bar');
     if (!bar) return;
     if (!document.getElementById('yt-turbo-controls')) {
-      // Vertical stack at the start of the speed bar: the Turbo toggle on top,
-      // the TG (screenshot) button directly BELOW it. align-items:stretch makes
-      // both buttons the SAME width/size.
       var col = document.createElement('div');
       col.id = 'yt-turbo-controls';
       col.style.cssText = 'display:flex;flex-direction:column;gap:4px;align-items:stretch;';
@@ -1003,16 +948,6 @@
       btn.className = 'yt-turbo-toggle';
       btn.setAttribute('onclick', 'ytToggleTurbo()');
       col.appendChild(btn);
-
-      // Send-screenshot-to-Telegram — same class as the Turbo button (= same
-      // size), placed right below it. Only shown in Turbo mode.
-      var tg = document.createElement('button');
-      tg.id = 'yt-turbo-tg';
-      tg.className = 'yt-turbo-toggle';
-      tg.textContent = '📤 TG';
-      tg.title = 'Send a screenshot of this exact frame to your Telegram';
-      tg.setAttribute('onclick', 'turboSendToTelegram()');
-      col.appendChild(tg);
 
       bar.insertBefore(col, bar.firstChild);
     }
