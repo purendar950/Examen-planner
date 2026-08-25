@@ -1,0 +1,20 @@
+name: Wire Telegram Dashboard v6
+on:
+  push:
+    branches: [feat/pro-telegram-dashboard-v6-clean]
+permissions:
+  contents: write
+jobs:
+  wire:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sed -i "s|require('./telegram-dashboard')|require('./telegram-dashboard-v6')|g" scripts/send-telegram.js scripts/send-telegram-evening.js
+          node --check scripts/send-telegram.js
+          node --check scripts/send-telegram-evening.js
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/send-telegram.js scripts/send-telegram-evening.js
+          git diff --cached --quiet || git commit -m "feat: wire professional Telegram dashboard v6"
+          git push origin HEAD:${GITHUB_REF_NAME}
