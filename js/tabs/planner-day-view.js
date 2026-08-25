@@ -318,10 +318,10 @@ function getCompletedTopics() {
   let subs = [];
   try { subs = getActiveSubjects() || []; } catch (e) {}
   subs.forEach(s => {
-    (s.chapters || []).forEach(ch => {
+    (s.chapters || []).forEach((ch, i) => {
       const p = appState.progress[ch.id];
       if (p && p.done) {
-        out.push({ id: ch.id, name: ch.name, subName: s.name, color: s.color, subId: s.id, completedAt: p.completedAt || null });
+        out.push({ id: ch.id, chapterNo: i + 1, name: ch.name, subName: s.name, color: s.color, subId: s.id, completedAt: p.completedAt || null });
       }
     });
   });
@@ -361,7 +361,7 @@ function renderCompletedTopicsCard() {
   const rows = _plannerCompletedOpen ? list.map(t => `
     <div style="display:flex;align-items:center;gap:10px;padding:.5rem .85rem;border-top:1px solid var(--border);">
       <div onclick="togglePlanTopicDone('${t.id}','${t.subId||''}')" title="Mark as not done (move back to plan)" style="width:18px;height:18px;border-radius:5px;border:2px solid var(--accent);background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:.72rem;line-height:1;cursor:pointer;flex-shrink:0;">✓</div>
-      <span style="flex:1;font-size:.82rem;color:var(--muted);text-decoration:line-through;">${escapeHtml(t.name)}</span>
+      <span style="flex:1;font-size:.82rem;color:var(--muted);text-decoration:line-through;">${escapeHtml(formatChapterName(t))}</span>
       <span style="font-size:.62rem;color:${t.color||'var(--muted)'};white-space:nowrap;">${escapeHtml(t.subName||'')}</span>
       <span style="font-size:.62rem;color:var(--muted);white-space:nowrap;min-width:42px;text-align:right;">${fmtDone(t.completedAt)}</span>
     </div>`).join('') : '';
