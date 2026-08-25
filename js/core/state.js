@@ -49,6 +49,9 @@ let appState = {
   ytLastVideo: null,
   ytPlaylists: {},
   ytWatched: {},  // plId -> {videoId: true}
+  ytVidTime: {},
+  ytVidProgress: {},
+  ytSync: { watched: {}, progress: {} }, // per-video conflict metadata for multi-device merge
   revisionStreak: 0,
   lastRevisionDate: null,
   plans: [],          // Saved plans: [{id, type, name, createdAt, cfg}]

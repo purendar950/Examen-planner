@@ -209,7 +209,8 @@ function getDefaultState() {
     // Private handwriting and highlighter strokes from AI Notes Focus.
     focusMarks: {},
     ytLastVideo: null, ytPlaylists: {}, ytWatched: {},
-    ytOrganiser: null, ytoLibrary: {}, ytVidProgress: {},
+    ytOrganiser: null, ytoLibrary: {}, ytVidTime: {}, ytVidProgress: {},
+    ytSync: { watched: {}, progress: {} },
     studyProfile: null,  // Feature 3 – set via Study Profile modal
     plans: [],            // Saved plans: [{id, type, name, createdAt, cfg}]
     activePlanId: null,
@@ -310,7 +311,9 @@ function loginUser(email, name, uid, state) {
     if (ap && ap.cfg) window._planConfig = JSON.parse(JSON.stringify(ap.cfg));
   }
   if (!appState.ytPlaylists) appState.ytPlaylists = {};
+  if (!appState.ytVidTime) appState.ytVidTime = {};
   if (!appState.ytVidProgress) appState.ytVidProgress = {};
+  try { if (typeof normalizeYouTubeSyncState === 'function') normalizeYouTubeSyncState(appState); } catch(e) {}
 
   document.getElementById('auth-screen').style.display   = 'none';
   document.getElementById('app').style.display           = 'block';
@@ -876,7 +879,10 @@ if (auth && !_isBadProtocol) {
       // Never overwrite edits that have not yet reached Firestore.
       if (typeof _localDirty !== 'undefined' && _localDirty) return;
       const keepActivePage = appState && appState.activePage;
-      const hydrated = { ...getDefaultState(), ...remoteState };
+      const remoteHydrated = { ...getDefaultState(), ...remoteState };
+      const hydrated = (typeof mergeYouTubeSyncState === 'function')
+        ? mergeYouTubeSyncState(remoteHydrated, appState)
+        : remoteHydrated;
       if (typeof isValidPage === 'function' && isValidPage(keepActivePage)) {
         hydrated.activePage = keepActivePage;
       }
@@ -886,6 +892,7 @@ if (auth && !_isBadProtocol) {
       try { if (typeof notesFocusRefreshPrivateMarks === 'function') notesFocusRefreshPrivateMarks(); } catch(e) {}
       if (appState.ytOrganiser && appState.ytOrganiser.videos) ytoState = appState.ytOrganiser;
       try { if (typeof ytoRenderMainSidebar === 'function') ytoRenderMainSidebar(); } catch(e) {}
+      try { if (typeof refreshYouTubeSyncUi === 'function') refreshYouTubeSyncUi(); } catch(e) {}
       try { updateDashboard(); } catch(e) {}
       try { buildSyllabus(); } catch(e) {}
       try {
@@ -1037,15 +1044,20 @@ if (auth && !_isBadProtocol) {
           proTrialUsed: !!(appState && appState.proTrialUsed)
         });
         const localJSON  = JSON.stringify(appState);
-        const remoteJSON = JSON.stringify({ ...getDefaultState(), ...remoteState });
+        const remoteHydrated = { ...getDefaultState(), ...remoteState };
+        const mergedRemote = (typeof mergeYouTubeSyncState === 'function')
+          ? mergeYouTubeSyncState(remoteHydrated, appState)
+          : remoteHydrated;
+        const remoteJSON = JSON.stringify(mergedRemote);
         if (localJSON !== remoteJSON) {
-          appState = { ...getDefaultState(), ...remoteState };
+          appState = mergedRemote;
           try { if (typeof notesFocusRefreshPrivateMarks === 'function') notesFocusRefreshPrivateMarks(); } catch(e) {}
           if (typeof isValidPage === 'function' && isValidPage(_keepActivePage)) {
             appState.activePage = _keepActivePage;
           }
           if (appState.ytOrganiser && appState.ytOrganiser.videos) ytoState = appState.ytOrganiser;
           try { if (typeof ytoRenderMainSidebar === 'function') ytoRenderMainSidebar(); } catch(e) {}
+          try { if (typeof refreshYouTubeSyncUi === 'function') refreshYouTubeSyncUi(); } catch(e) {}
           const remoteTrialJSON = JSON.stringify({
             proTrial: appState.proTrial || null,
             proTrialUsed: !!appState.proTrialUsed

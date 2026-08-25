@@ -6,6 +6,7 @@ import {
   readQueuedStateRecord,
   writeOfflineState
 } from './offlineStore.js';
+import { mergeYouTubeSyncState } from './youtubeSync.js';
 
 export function createStorageService({ db, auth, localStorageRef = window.localStorage } = {}) {
   function cacheKey(uid) {
@@ -140,32 +141,41 @@ export function createStorageService({ db, auth, localStorageRef = window.localS
     }
   }
 
-  /* The whole appState goes up as ONE field, and it must REPLACE that field
-     rather than deep-merge into it.
-
-     Firestore's { merge: true } merges nested maps key by key. appState is one
-     big nested map, so a key the user deleted locally (a playlist, a task, an
-     exam) is simply absent from the payload — and an absent key is left
-     untouched on the server instead of being removed. The next snapshot then
-     handed that key back and the deleted item reappeared.
-
-     update() replaces the named field wholesale, so a deletion is a real
-     deletion, while sibling document fields (Pro status, Telegram link, …) are
-     still left alone because update() only touches the fields it is given.
-     update() rejects a document that does not exist yet, so a brand-new
-     account falls back to the creating merge write. */
+  /* Save through a transaction so two devices watching different videos do
+     not overwrite each other's completion/resume records. Non-YouTube fields
+     retain the app's existing whole-state last-write behavior, while the
+     YouTube merge uses per-video timestamps and unmark tombstones. */
   async function saveUserState(uid, appState) {
     if (!db || !uid) throw new Error('Firestore db and uid are required');
-    const payload = {
-      appState,
-      updatedAt: window.firebase?.firestore?.FieldValue?.serverTimestamp?.() || new Date().toISOString()
-    };
     const ref = db.collection('users').doc(uid);
+    const serverTimestamp = () => window.firebase?.firestore?.FieldValue?.serverTimestamp?.() || new Date().toISOString();
+
+    if (typeof db.runTransaction === 'function') {
+      return db.runTransaction(async (transaction) => {
+        const snap = await transaction.get(ref);
+        const remoteState = snap.exists ? (snap.data().appState || {}) : {};
+        // Preserve fields introduced by another device/build that this local
+        // state does not know about, while retaining existing local ownership
+        // for known top-level fields. Per-video operations are rebased below.
+        const candidateState = { ...remoteState, ...appState };
+        const mergedState = mergeYouTubeSyncState(candidateState, remoteState, { resolveLocalPending: true });
+        const payload = { appState: mergedState, updatedAt: serverTimestamp() };
+        if (snap.exists) transaction.update(ref, payload);
+        else transaction.set(ref, payload, { merge: true });
+        return mergedState;
+      });
+    }
+
+    // Compatibility fallback for minimal Firebase mocks/older SDK wrappers.
+    const resolvedState = mergeYouTubeSyncState(appState, {}, { resolveLocalPending: true });
+    const payload = { appState: resolvedState, updatedAt: serverTimestamp() };
     try {
-      return await ref.update(payload);
+      await ref.update(payload);
+      return resolvedState;
     } catch (error) {
       if (error?.code !== 'not-found') throw error;
-      return ref.set(payload, { merge: true });
+      await ref.set(payload, { merge: true });
+      return resolvedState;
     }
   }
 

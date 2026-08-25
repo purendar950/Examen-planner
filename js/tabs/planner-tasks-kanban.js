@@ -76,14 +76,7 @@ function setTaskStatus(dateStr, taskId, status) {
 /* Mirror a video's watched flag onto both watched stores for the given course. */
 function setCourseVideoWatched(plId, videoId, watched) {
   if (!videoId || !plId) return;
-  const lib = appState.ytoLibrary || {};
-  if (lib[plId]) {
-    if (!lib[plId].watched) lib[plId].watched = {};
-    if (watched) lib[plId].watched[videoId] = true; else delete lib[plId].watched[videoId];
-  }
-  if (!appState.ytWatched) appState.ytWatched = {};
-  if (!appState.ytWatched[plId]) appState.ytWatched[plId] = {};
-  if (watched) appState.ytWatched[plId][videoId] = true; else delete appState.ytWatched[plId][videoId];
+  setYouTubeVideoWatched(plId, videoId, watched);
   if (typeof ytoRenderMainSidebar === 'function') {
     try { ytoRenderMainSidebar(); } catch (e) {}
   }

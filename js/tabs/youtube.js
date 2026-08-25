@@ -244,7 +244,7 @@ function ytResumeLoad(autoRestore) {
 
   // Tell ytDoLoad to cue (no autoplay) when auto-restoring.
   if (autoRestore) ytAutoCueNext = true;
-  ytLoadInTab(lv.type, lv.id, url, lv.title);
+  ytLoadInTab(lv.type, lv.id, url, lv.title, autoRestore ? { preserveLastVideo: lv } : null);
 
   // Restore full organiser course sidebar after load
   if (resolvedPlId) {
@@ -419,7 +419,23 @@ function ytPlay() {
   ytLoadInTab(v.type, v.id, url, v.type === 'playlist' ? 'Playlist' : 'Video');
 }
 
-function ytLoadInTab(type, id, originalUrl, label) {
+function ytTouchLastVideoActivity() {
+  if (!ytCurrentVideoId || /^playlist_/.test(ytCurrentVideoId)) return;
+  const existing = appState.ytLastVideo;
+  // Explicit selection already created the pending activity operation.
+  if (existing && existing.id === ytCurrentVideoId && existing.pending) return;
+  const video = {
+    type: 'video',
+    id: ytCurrentVideoId,
+    title: ytCurrentVideoTitle || (existing && existing.title) || 'Video',
+    url: `https://youtube.com/watch?v=${ytCurrentVideoId}`
+  };
+  if (typeof ytoCurrentPl !== 'undefined' && ytoCurrentPl) video.ytoPlId = ytoCurrentPl;
+  setYouTubeLastVideo(video);
+  saveProgress();
+}
+
+function ytLoadInTab(type, id, originalUrl, label, options) {
   const metaBar = document.getElementById('yt-meta-bar');
   const titleEl = document.getElementById('yt-now-title');
   const openLink = document.getElementById('yt-open-link');
@@ -442,8 +458,16 @@ function ytLoadInTab(type, id, originalUrl, label) {
     ytCurrentVideoTitle = label || 'Playlist';
   }
 
-  // Save for resume
-  appState.ytLastVideo = { type, id, title: label || (type === 'playlist' ? 'Playlist' : 'Video'), url: originalUrl };
+  // Save for resume. Automatic page restoration preserves the prior activity
+  // timestamp; only an explicit selection or actual playback can become the
+  // account-level "Continue" winner on another device.
+  if (options && options.preserveLastVideo) {
+    appState.ytLastVideo = { ...options.preserveLastVideo };
+  } else {
+    const lastVideo = { type, id, title: label || (type === 'playlist' ? 'Playlist' : 'Video'), url: originalUrl };
+    if (typeof ytoCurrentPl !== 'undefined' && ytoCurrentPl && type === 'video') lastVideo.ytoPlId = ytoCurrentPl;
+    setYouTubeLastVideo(lastVideo);
+  }
   if (!appState.ytPlaylists) appState.ytPlaylists = {};
   saveProgress();
   ytUpdateNotesContext();
@@ -722,6 +746,7 @@ window.onYouTubeIframeAPIReady = function() {
             try { ytPlayer.pauseVideo(); } catch (err) {}
             return;
           }
+          ytTouchLastVideoActivity();
           ytStartProgressPolling();
         }
         if (e.data === YT.PlayerState.PAUSED)   { ytStopProgressPolling(); ytSaveCurrentTime(); }
@@ -801,15 +826,8 @@ function ytSaveCurrentTime() {
   try { cur = ytPlayer.getCurrentTime(); dur = ytPlayer.getDuration(); } catch (e) { return; }
   if (!cur || cur < 1) return;
   const plKey = ytoCurrentPl || ytCurrentPlaylistId || '_single';
-  if (!appState.ytVidTime) appState.ytVidTime = {};
-  if (!appState.ytVidTime[plKey]) appState.ytVidTime[plKey] = {};
-  appState.ytVidTime[plKey][ytCurrentVideoId] = Math.floor(cur);
-  if (dur > 0) {
-    const pct = Math.round(cur / dur * 100);
-    if (!appState.ytVidProgress) appState.ytVidProgress = {};
-    if (!appState.ytVidProgress[plKey]) appState.ytVidProgress[plKey] = {};
-    appState.ytVidProgress[plKey][ytCurrentVideoId] = pct;
-  }
+  const pct = dur > 0 ? Math.round(cur / dur * 100) : null;
+  setYouTubeVideoProgress(plKey, ytCurrentVideoId, Math.floor(cur), pct);
   try { saveProgress(); } catch (e) {}
 }
 
@@ -1392,9 +1410,9 @@ function ytPlayFromList(idx) {
   // Highlight active row
   document.querySelectorAll('.yt-video-item').forEach((el, i) => el.classList.toggle('active', i === idx));
 
-  // Auto-mark watched + save resume
-  ytMarkWatched(v.id, false);
-  appState.ytLastVideo = { type: 'video', id: v.id, title: v.title, url: `https://youtube.com/watch?v=${v.id}` };
+  // Selecting/replaying a row must never toggle its completion state. Only the
+  // explicit check button or the 90%/ended path changes watched status.
+  setYouTubeLastVideo({ type: 'video', id: v.id, title: v.title, url: `https://youtube.com/watch?v=${v.id}` });
   saveProgress();
 
   // Scroll to top (mobile)
@@ -1403,17 +1421,12 @@ function ytPlayFromList(idx) {
 
 /* ── Mark video as watched / unwatched ── */
 function ytMarkWatched(videoId, rerender = true) {
-  if (!appState.ytWatched) appState.ytWatched = {};
-  if (!appState.ytWatched[ytCurrentPlaylistId]) appState.ytWatched[ytCurrentPlaylistId] = {};
-  if (ytVideoWatched[videoId]) {
-    delete ytVideoWatched[videoId];
-    delete appState.ytWatched[ytCurrentPlaylistId][videoId];
-  } else {
-    ytVideoWatched[videoId] = true;
-    appState.ytWatched[ytCurrentPlaylistId][videoId] = true;
-  }
+  const scope = ytCurrentPlaylistId || '_single';
+  const nextWatched = !((appState.ytWatched && appState.ytWatched[scope] && appState.ytWatched[scope][videoId]) || ytVideoWatched[videoId]);
+  setYouTubeVideoWatched(scope, videoId, nextWatched);
+  ytVideoWatched = (appState.ytWatched && appState.ytWatched[scope]) || {};
   /* Keep any matching planner video To-Do task in sync with the watched flag. */
-  if (typeof syncWatchedToVideoTasks === 'function') syncWatchedToVideoTasks(videoId, !!ytVideoWatched[videoId]);
+  if (typeof syncWatchedToVideoTasks === 'function') syncWatchedToVideoTasks(videoId, nextWatched);
   saveProgress();
   if (rerender) ytRenderVideoList();
   ytUpdatePlaylistProgress();
@@ -1499,7 +1512,7 @@ function ytAutoMarkOnComplete() {
   if (ytoCurrentPl) {
     var pl = ytoLib()[ytoCurrentPl]; if (!pl) return;
     if (!pl.watched[ytCurrentVideoId]) {
-      pl.watched[ytCurrentVideoId] = true;
+      setYouTubeVideoWatched(ytoCurrentPl, ytCurrentVideoId, true);
       ytoPersist();
       ytoPopulateYtSidebar(ytoCurrentPl, ytCurrentVideoId);
       if (typeof syncWatchedToVideoTasks === 'function') syncWatchedToVideoTasks(ytCurrentVideoId, true);
@@ -1509,12 +1522,10 @@ function ytAutoMarkOnComplete() {
   }
 
   // ── Plain Playlist tab ──
-  if (!appState.ytWatched) appState.ytWatched = {};
   var plKey = ytCurrentPlaylistId || '_single';
-  if (!appState.ytWatched[plKey]) appState.ytWatched[plKey] = {};
-  if (!appState.ytWatched[plKey][ytCurrentVideoId]) {
-    appState.ytWatched[plKey][ytCurrentVideoId] = true;
-    ytVideoWatched[ytCurrentVideoId] = true;
+  if (!(appState.ytWatched && appState.ytWatched[plKey] && appState.ytWatched[plKey][ytCurrentVideoId])) {
+    setYouTubeVideoWatched(plKey, ytCurrentVideoId, true);
+    ytVideoWatched = appState.ytWatched[plKey] || {};
     if (typeof syncWatchedToVideoTasks === 'function') syncWatchedToVideoTasks(ytCurrentVideoId, true);
     saveProgress();
     ytRenderVideoList();

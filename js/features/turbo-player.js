@@ -335,14 +335,9 @@
       if (!cur || cur < 1) return;
       var plKey = (typeof ytoCurrentPl !== 'undefined' && ytoCurrentPl)
         || (typeof ytCurrentPlaylistId !== 'undefined' && ytCurrentPlaylistId) || '_single';
-      appState.ytVidTime = appState.ytVidTime || {};
-      appState.ytVidTime[plKey] = appState.ytVidTime[plKey] || {};
-      appState.ytVidTime[plKey][turboVid] = Math.floor(cur);
-      if (dur > 0) {
-        var pct = Math.round(cur / dur * 100);
-        appState.ytVidProgress = appState.ytVidProgress || {};
-        appState.ytVidProgress[plKey] = appState.ytVidProgress[plKey] || {};
-        appState.ytVidProgress[plKey][turboVid] = pct;
+      var pct = dur > 0 ? Math.round(cur / dur * 100) : null;
+      if (typeof setYouTubeVideoProgress === 'function') {
+        setYouTubeVideoProgress(plKey, turboVid, Math.floor(cur), pct);
       }
       if (typeof saveProgress === 'function') saveProgress();
     } catch (e) {}

@@ -1004,9 +1004,10 @@ function ytoToggleChap(ci) {
 
 function ytoToggleWatch(plId, vid) {
   const pl = ytoLib()[plId]; if (!pl) return;
-  if (pl.watched[vid]) delete pl.watched[vid]; else pl.watched[vid] = true;
+  const watched = !pl.watched[vid];
+  setYouTubeVideoWatched(plId, vid, watched);
   /* Keep any matching planner video To-Do task in sync with the watched flag. */
-  if (typeof syncWatchedToVideoTasks === 'function') syncWatchedToVideoTasks(vid, !!pl.watched[vid]);
+  if (typeof syncWatchedToVideoTasks === 'function') syncWatchedToVideoTasks(vid, watched);
   ytoPersist();
   const y = window.scrollY; ytoRefreshCourse(); window.scrollTo(0, y);
 }
@@ -1289,7 +1290,7 @@ function ytoPopulateYtSidebar(plId, currentVid) {
 /* ── One-click mark done from YT sidebar → syncs back to organiser ── */
 function ytoMarkDoneFromYt(plId, vid) {
   var pl = ytoLib()[plId]; if (!pl) return;
-  if (pl.watched[vid]) delete pl.watched[vid]; else pl.watched[vid] = true;
+  setYouTubeVideoWatched(plId, vid, !pl.watched[vid]);
   ytoPersist();
   ytoPopulateYtSidebar(plId, ytCurrentVideoId || vid);
 }
@@ -1300,7 +1301,7 @@ function ytOnVideoEndedFromYtTab() {
   var pl = ytoLib()[ytoCurrentPl]; if (!pl) return;
   var vid = ytCurrentVideoId;
   if (vid && !pl.watched[vid]) {
-    pl.watched[vid] = true; ytoPersist();
+    setYouTubeVideoWatched(ytoCurrentPl, vid, true); ytoPersist();
     showToast('✅ Video done mark ho gayi!', 'success');
   }
   ytoPopulateYtSidebar(ytoCurrentPl, vid);
