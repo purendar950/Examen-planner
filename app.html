@@ -280,13 +280,49 @@
   <div id="exam-selector-bar" class="exam-selector-bar">
     <span class="exam-selector-label">Exam</span>
     <div class="exam-pills-scroll">
+      <!-- SSC Exams -->
       <button class="exam-select-btn active" onclick="switchExam('cgl')" id="examBtn-cgl">SSC CGL</button>
-      <button class="exam-select-btn" onclick="switchExam('ntpc')" id="examBtn-ntpc">RRB NTPC</button>
-      <button class="exam-select-btn" onclick="switchExam('gd')" id="examBtn-gd">SSC GD</button>
-      <button class="exam-select-btn" onclick="switchExam('ibps')" id="examBtn-ibps">IBPS PO</button>
-      <button class="exam-select-btn exam-select-upsc" onclick="switchExam('upsc')" id="examBtn-upsc">UPSC CSE</button>
-      <button class="exam-select-btn exam-select-uppcs" onclick="switchExam('uppcs')" id="examBtn-uppcs">UPPCS</button>
-      <button class="exam-select-btn exam-select-bpsc" onclick="switchExam('bpsc')" id="examBtn-bpsc">BPSC</button>
+      <button class="exam-select-btn" onclick="switchExam('chsl')" id="examBtn-chsl">SSC CHSL</button>
+      <button class="exam-select-btn" onclick="switchExam('cpo')" id="examBtn-cpo">SSC CPO</button>
+      <button class="exam-select-btn" onclick="switchExam('gd')" id="examBtn-gd">SSC GD Constabl</button>
+      <button class="exam-select-btn" onclick="switchExam('sscje')" id="examBtn-sscje">SSC JE - Junior</button>
+      <button class="exam-select-btn" onclick="switchExam('mts')" id="examBtn-mts">SSC MTS & Haval</button>
+      <button class="exam-select-btn" onclick="switchExam('steno')" id="examBtn-steno">SSC Stenographe</button>
+      <!-- Railways -->
+      <button class="exam-select-btn" onclick="switchExam('rpfsi')" id="examBtn-rpfsi">RPF SI</button>
+      <button class="exam-select-btn" onclick="switchExam('alp')" id="examBtn-alp">RRB ALP</button>
+      <button class="exam-select-btn" onclick="switchExam('rrbgd')" id="examBtn-rrbgd">RRB Group D</button>
+      <button class="exam-select-btn" onclick="switchExam('rrbje')" id="examBtn-rrbje">RRB JE</button>
+      <button class="exam-select-btn" onclick="switchExam('ntpc')" id="examBtn-ntpc">RRB NTPC Atomic</button>
+      <!-- Banking -->
+      <button class="exam-select-btn" onclick="switchExam('ibps')" id="examBtn-ibps">Bank PO Prelims</button>
+      <!-- UPSC & State PSC -->
+      <button class="exam-select-btn" onclick="switchExam('upsc')" id="examBtn-upsc">UPSC Civil Serv</button>
+      <button class="exam-select-btn" onclick="switchExam('epfo')" id="examBtn-epfo">UPSC EPFO</button>
+      <!-- DSSSB -->
+      <button class="exam-select-btn" onclick="switchExam('dsssb')" id="examBtn-dsssb">DSSSB ASO & DAS</button>
+      <!-- Bihar Exams -->
+      <button class="exam-select-btn" onclick="switchExam('biharpolice')" id="examBtn-biharpolice">Bihar Police Co</button>
+      <button class="exam-select-btn" onclick="switchExam('bpsc')" id="examBtn-bpsc">BPSC AEDO</button>
+      <button class="exam-select-btn" onclick="switchExam('bssc')" id="examBtn-bssc">BSSC</button>
+      <!-- UP Exams -->
+      <button class="exam-select-btn" onclick="switchExam('uppolice')" id="examBtn-uppolice">UP Police Const</button>
+      <button class="exam-select-btn" onclick="switchExam('uppolicesi')" id="examBtn-uppolicesi">UP Police Sub I</button>
+      <button class="exam-select-btn" onclick="switchExam('uppcs')" id="examBtn-uppcs">UPPSC RO and AR</button>
+      <!-- CAT(Common Admission Test) -->
+      <button class="exam-select-btn" onclick="switchExam('cat')" id="examBtn-cat">CAT</button>
+      <!-- Defense -->
+      <button class="exam-select-btn" onclick="switchExam('cds')" id="examBtn-cds">Combined Defenc</button>
+      <button class="exam-select-btn" onclick="switchExam('airforce')" id="examBtn-airforce">Indian Air Forc</button>
+      <button class="exam-select-btn" onclick="switchExam('ib')" id="examBtn-ib">Intelligence Bu</button>
+      <button class="exam-select-btn" onclick="switchExam('nda')" id="examBtn-nda">NDA - National </button>
+      <!-- Engineering & Medical -->
+      <button class="exam-select-btn" onclick="switchExam('gate')" id="examBtn-gate">GATE Engineerin</button>
+      <button class="exam-select-btn" onclick="switchExam('jeeadv')" id="examBtn-jeeadv">JEE Advanced</button>
+      <button class="exam-select-btn" onclick="switchExam('jeemain')" id="examBtn-jeemain">JEE Main</button>
+      <button class="exam-select-btn" onclick="switchExam('neet')" id="examBtn-neet">NEET UG</button>
+      <!-- Teaching & Research -->
+      <button class="exam-select-btn" onclick="switchExam('ugcnet')" id="examBtn-ugcnet">UGC NET JRF Pap</button>
     </div>
   </div>
 
@@ -538,14 +574,39 @@
 <script defer src="js/core/firebase.js"></script>
 <script defer src="js/core/backend-router.js?v=20260818a"></script>
 <!-- exams.js split into one file per exam + an index assembler (see
-     js/data/exams/index.js header comment) — index.js MUST load last. -->
-<script defer src="js/data/exams/cgl.js"></script>
-<script defer src="js/data/exams/ntpc.js"></script>
-<script defer src="js/data/exams/gd.js"></script>
-<script defer src="js/data/exams/ibps.js"></script>
-<script defer src="js/data/exams/upsc.js"></script>
-<script defer src="js/data/exams/uppcs.js"></script>
+<!-- Exam data files — index.js MUST load last. -->
+<script defer src="js/data/exams/airforce.js"></script>
+<script defer src="js/data/exams/alp.js"></script>
+<script defer src="js/data/exams/biharpolice.js"></script>
 <script defer src="js/data/exams/bpsc.js"></script>
+<script defer src="js/data/exams/bssc.js"></script>
+<script defer src="js/data/exams/cat.js"></script>
+<script defer src="js/data/exams/cds.js"></script>
+<script defer src="js/data/exams/cgl.js"></script>
+<script defer src="js/data/exams/chsl.js"></script>
+<script defer src="js/data/exams/cpo.js"></script>
+<script defer src="js/data/exams/dsssb.js"></script>
+<script defer src="js/data/exams/epfo.js"></script>
+<script defer src="js/data/exams/gate.js"></script>
+<script defer src="js/data/exams/gd.js"></script>
+<script defer src="js/data/exams/ib.js"></script>
+<script defer src="js/data/exams/ibps.js"></script>
+<script defer src="js/data/exams/jeeadv.js"></script>
+<script defer src="js/data/exams/jeemain.js"></script>
+<script defer src="js/data/exams/mts.js"></script>
+<script defer src="js/data/exams/nda.js"></script>
+<script defer src="js/data/exams/neet.js"></script>
+<script defer src="js/data/exams/ntpc.js"></script>
+<script defer src="js/data/exams/rpfsi.js"></script>
+<script defer src="js/data/exams/rrbgd.js"></script>
+<script defer src="js/data/exams/rrbje.js"></script>
+<script defer src="js/data/exams/sscje.js"></script>
+<script defer src="js/data/exams/steno.js"></script>
+<script defer src="js/data/exams/ugcnet.js"></script>
+<script defer src="js/data/exams/uppcs.js"></script>
+<script defer src="js/data/exams/uppolice.js"></script>
+<script defer src="js/data/exams/uppolicesi.js"></script>
+<script defer src="js/data/exams/upsc.js"></script>
 <script defer src="js/data/exams/index.js"></script>
 <script defer src="js/data/syllabus-data.js"></script>
 <script defer src="js/core/state.js"></script>
