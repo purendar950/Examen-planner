@@ -1,0 +1,290 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function owner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function validInitialProfile() {
+      let profile = request.resource.data.get('profile', {});
+      return profile is map
+        && profile.keys().hasOnly([
+          'name', 'email', 'mobile', 'examTarget', 'status', 'plan',
+          'referredBy', 'fp', 'ip', 'deviceDuplicate', 'requestedAt',
+          'createdAt', 'provider'
+        ])
+        && (!profile.keys().hasAny(['plan']) || profile.plan == 'free')
+        && (!profile.keys().hasAny(['status']) || profile.status == 'approved');
+    }
+
+    function validUserCreate(uid) {
+      return owner(uid)
+        && request.resource.data.keys().hasOnly(['profile', 'appState', 'updatedAt'])
+        && validInitialProfile()
+        && (!request.resource.data.keys().hasAny(['appState'])
+          || request.resource.data.appState is map);
+    }
+
+    function validProfileUpdate() {
+      let before = resource.data.get('profile', {});
+      let after = request.resource.data.get('profile', {});
+      let changed = after.diff(before).affectedKeys();
+      return after is map
+        && changed.hasOnly([
+          'name', 'email', 'createdAt', 'provider',
+          'trialUsage', 'trialLastTrackedFeature', 'trialLastTrackedAt'
+        ])
+        && (!changed.hasAny(['name'])
+          || (after.name is string && after.name.size() > 0 && after.name.size() <= 100));
+    }
+
+    function validInboxClear(field) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return !changed.hasAny([field])
+        || (request.resource.data.get(field, null) is list
+          && request.resource.data.get(field, []).size() == 0);
+    }
+
+    function validUserUpdate(uid) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return owner(uid)
+        && changed.hasOnly([
+          'appState', 'updatedAt', 'profile',
+          'telegramInbox', 'calculationAttemptInbox', 'mockAttemptInbox'
+        ])
+        && (!changed.hasAny(['appState']) || request.resource.data.appState is map)
+        && (!changed.hasAny(['profile']) || validProfileUpdate())
+        && validInboxClear('telegramInbox')
+        && validInboxClear('calculationAttemptInbox')
+        && validInboxClear('mockAttemptInbox');
+    }
+
+    match /users/{uid} {
+      allow get: if owner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if validUserCreate(uid) || isAdmin();
+      allow update: if validUserUpdate(uid) || isAdmin();
+      allow delete: if isAdmin();
+
+      match /state/{chunkId} {
+        allow read, write: if owner(uid) || isAdmin();
+      }
+    }
+
+    match /admins/{uid} {
+      allow get: if owner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow write: if false;
+    }
+
+    match /plans/{planId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /config/{configId} {
+      allow read: if isAdmin()
+        || (signedIn() && configId in [
+          'payment', 'free', 'settings', 'pro', 'turbo', 'youtube'
+        ]);
+      allow write: if isAdmin();
+    }
+
+    match /payments/{paymentId} {
+      // Creation/update is performed by authenticated backend code with the
+      // Admin SDK so plan prices, coupon usage and immutable transaction IDs
+      // are recomputed atomically instead of trusted from the browser.
+      allow create, update, delete: if isAdmin();
+      allow read: if isAdmin()
+        || (signedIn() && resource.data.uid == request.auth.uid);
+    }
+
+    match /requests/{requestId} {
+      allow create: if signedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'new'
+        && request.resource.data.type in ['feature', 'exam', 'chapter', 'youtube', 'bug', 'other']
+        && request.resource.data.detail is string
+        && request.resource.data.detail.size() >= 10
+        && request.resource.data.detail.size() <= 5000;
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /coupons/{couponId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /coupon_redemptions/{redemptionId} {
+      allow read, write: if isAdmin();
+    }
+
+    function circleOwner(circleId) {
+      return signedIn()
+        && get(/databases/$(database)/documents/studyCircles/$(circleId)).data.ownerId == request.auth.uid;
+    }
+
+    function circleMember(circleId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/studyCircles/$(circleId)/members/$(request.auth.uid));
+    }
+
+    function validCircleMember(memberUid, role) {
+      return request.resource.data.keys().hasOnly([
+          'uid', 'name', 'avatar', 'role', 'joinedAt', 'isPremium',
+          'isFocusing', 'weeklyFocusMinutes', 'weekKey'
+        ])
+        && request.resource.data.uid == memberUid
+        && request.resource.data.role == role
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 100
+        && request.resource.data.avatar is string
+        && request.resource.data.isPremium is bool
+        && request.resource.data.isFocusing is bool
+        && request.resource.data.weeklyFocusMinutes is number
+        && request.resource.data.weeklyFocusMinutes >= 0;
+    }
+
+    match /studyCircles/{circleId} {
+      // Public discovery remains queryable with visibility == 'public'. Private
+      // metadata (including joinCode) is visible only to owners/members; invite
+      // codes are exchanged through the authenticated backend join endpoint.
+      allow get, list: if signedIn() && (
+        resource.data.visibility == 'public'
+        || resource.data.ownerId == request.auth.uid
+        || circleMember(circleId)
+      );
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly([
+          'name', 'ownerId', 'ownerName', 'ownerAvatar', 'visibility',
+          'joinCode', 'createdAt', 'memberCount', 'focusingCount',
+          'maxMembers', 'approvalRequired'
+        ])
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 100
+        && request.resource.data.visibility in ['public', 'private']
+        && request.resource.data.memberCount == 1
+        && request.resource.data.focusingCount == 0
+        && ((request.resource.data.visibility == 'public'
+            && request.resource.data.joinCode == '')
+          || (request.resource.data.visibility == 'private'
+            && request.resource.data.joinCode is string
+            && request.resource.data.joinCode.matches('^[A-HJ-NP-Z2-9]{6}$')
+            && request.resource.data.approvalRequired == false));
+      allow update: if signedIn() && (
+        (resource.data.ownerId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['name', 'memberCount', 'focusingCount'])
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.memberCount >= 0)
+        || (circleMember(circleId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberCount'])
+          && request.resource.data.memberCount == resource.data.memberCount - 1)
+      );
+      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+
+      match /members/{memberUid} {
+        allow get: if signedIn() && (
+          request.auth.uid == memberUid || circleOwner(circleId) || circleMember(circleId)
+        );
+        allow list: if circleOwner(circleId) || circleMember(circleId);
+        // Ordinary joins are Admin-SDK writes. Browser member creation is only
+        // for the owner record created immediately after the parent circle.
+        allow create: if circleOwner(circleId)
+          && request.resource.data.uid == memberUid
+          && ((memberUid == request.auth.uid && validCircleMember(memberUid, 'owner'))
+            || (memberUid != request.auth.uid && validCircleMember(memberUid, 'member')));
+        allow update: if signedIn()
+          && request.auth.uid == memberUid
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['isFocusing', 'weeklyFocusMinutes', 'weekKey'])
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.role == resource.data.role
+          && request.resource.data.weeklyFocusMinutes is number
+          && request.resource.data.weeklyFocusMinutes >= 0;
+        allow delete: if signedIn()
+          && (request.auth.uid == memberUid || circleOwner(circleId));
+      }
+
+      match /joinRequests/{requestUid} {
+        allow read: if signedIn()
+          && (request.auth.uid == requestUid || circleOwner(circleId));
+        allow create: if signedIn()
+          && request.auth.uid == requestUid
+          && get(/databases/$(database)/documents/studyCircles/$(circleId)).data.visibility == 'public'
+          && get(/databases/$(database)/documents/studyCircles/$(circleId)).data.approvalRequired == true
+          && request.resource.data.keys().hasOnly(['uid', 'name', 'avatar', 'status', 'requestedAt'])
+          && request.resource.data.uid == requestUid
+          && request.resource.data.status == 'pending';
+        allow update: if circleOwner(circleId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt'])
+          && request.resource.data.status in ['approved', 'rejected'];
+        allow delete: if false;
+      }
+
+      match /messages/{messageId} {
+        allow read: if signedIn()
+          && exists(/databases/$(database)/documents/studyCircles/$(circleId))
+          && circleMember(circleId);
+        allow create: if signedIn()
+          && exists(/databases/$(database)/documents/studyCircles/$(circleId))
+          && circleMember(circleId)
+          && request.resource.data.keys().hasOnly(['uid', 'name', 'avatar', 'text', 'createdAt'])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 1000;
+        allow update, delete: if false;
+      }
+    }
+
+    match /fc_presence/{uid} {
+      allow read: if signedIn();
+      allow create, update: if owner(uid)
+        && request.resource.data.circleIds is list
+        && request.resource.data.circleIds.size() <= 20;
+      allow delete: if owner(uid);
+    }
+
+    match /focusStats/{uid} {
+      allow read: if owner(uid) || isAdmin();
+      allow create, update: if owner(uid)
+        && request.resource.data.weekKey is string
+        && request.resource.data.totalFocusMinutes is number
+        && request.resource.data.totalFocusMinutes >= 0
+        && request.resource.data.weeklyFocusMinutes is number
+        && request.resource.data.weeklyFocusMinutes >= 0;
+      allow delete: if owner(uid) || isAdmin();
+    }
+
+    match /admin_logs/{logId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /referral_devices/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /referral_accounts/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /referral_log/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -427,7 +427,9 @@ function renderPaymentList() {
   if (!list.length) return h + '<div class="empty">Is filter mein koi payment nahi.</div>';
   h += list.map(p => {
     const st = p.status === 'verified' ? '<span class="badge badge-green">Verified</span>' : p.status === 'declined' ? '<span class="badge badge-red">Declined</span>' : '<span class="badge badge-amber">Pending</span>';
-    const ss = p.screenshotUrl ? '<a href="' + esc(p.screenshotUrl) + '" target="_blank" style="font-size:0.78rem;color:var(--accent);margin-left:8px;">View Screenshot</a>' : '';
+    const ss = (p.screenshotPath || p.screenshotUrl)
+      ? '<button class="btn btn-gray" onclick="openPaymentProof(\'' + p.id + '\')" style="font-size:0.72rem;margin-left:8px;">View Screenshot</button>'
+      : '';
     const isDup = p.txnId && dupTxnSet.has(String(p.txnId).trim().toLowerCase());
     const dupFlag = isDup ? ' <span class="flag" style="background:rgba(239,68,68,0.15);color:var(--red);">⚠ Duplicate Txn (' + txnCounts[String(p.txnId).trim().toLowerCase()] + 'x)</span>' : '';
     return '<div class="card ' + (isDup ? 'dup-row' : '') + '" style="margin-bottom:10px;">' +
@@ -438,7 +440,7 @@ function renderPaymentList() {
           ? '<s style="color:var(--muted);">Rs.' + (p.originalAmount || 0) + '</s> <strong style="color:var(--accent);">Rs.' + (p.amount || 0) + '</strong> <span class="badge badge-blue">\ud83c\udfaf ' + esc(p.couponCode) + ' (' + (p.couponPercent||0) + '% off)</span> &middot; '
           : 'Rs.' + (p.amount || 0) + ' &middot; ') +
       'Txn: <strong>' + esc(p.txnId || '-') + '</strong> &middot; ' + fmtDate(p.createdAt) + '</div>' +
-      (p.screenshotUrl ? '<div style="margin-top:8px;"><img src="' + esc(p.screenshotUrl) + '" style="max-width:220px;max-height:130px;border-radius:8px;border:1px solid var(--border);cursor:pointer;" onclick="openLightbox(this.src)" title="Click to enlarge"></div>' : '') +
+      '</div>' +
       '</div>' +
       (p.status === 'pending'
         ? '<div class="row" style="flex-shrink:0;align-items:flex-start;"><button class="btn btn-green" onclick="verifyPayment(\'' + p.id + '\')">Verify & Activate</button>' +
@@ -597,7 +599,7 @@ function renderReconciliation() {
 /* CSV export — saves to local Downloads via Blob */
 function exportPaymentsCSV() {
   if (!PAYMENTS.length) { showToast('Koi payment nahi export karne ko.'); return; }
-  const headers = ['id','createdAt','email','uid','planId','planName','amount','txnId','status','verifiedAt','screenshotUrl'];
+  const headers = ['id','createdAt','email','uid','planId','planName','amount','txnId','status','verifiedAt','screenshotPath','screenshotUrl'];
   const rows = PAYMENTS.map(p => headers.map(h => {
     let v = p[h];
     if (v && typeof v === 'object' && v.toDate) v = v.toDate().toISOString();
@@ -617,6 +619,28 @@ function exportPaymentsCSV() {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   showToast('\u2705 Exported ' + PAYMENTS.length + ' payments');
+}
+
+/* Payment proof access is admin-authenticated and returns a five-minute signed
+   URL for new private objects. Legacy bearer URLs are exposed only through the
+   same authenticated endpoint during migration. */
+async function openPaymentProof(paymentId) {
+  try {
+    if (!auth || !auth.currentUser) throw new Error('Admin session expired. Sign in again.');
+    const token = await auth.currentUser.getIdToken();
+    const response = await fetch('https://examen-planner-2.onrender.com/payments/proof-url', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paymentId: paymentId })
+    });
+    const result = await response.json().catch(function() { return {}; });
+    if (!response.ok || result.ok !== true || !result.url) {
+      throw new Error(result.error || 'Screenshot could not be loaded.');
+    }
+    openLightbox(result.url);
+  } catch (error) {
+    showToast(error.message || 'Screenshot could not be loaded.', 'error');
+  }
 }
 
 /* Payment screenshot lightbox */

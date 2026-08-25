@@ -77,45 +77,41 @@ async function createCircle(name, visibility, approvalRequired = false) {
   return { circleId: cid, joinCode: code };
 }
 
-async function joinByCode(code) {
-  const database = fcDb();
-  if (!database) throw new Error('Firebase not configured');
+async function _joinCircleBackend(payload) {
   if (!currentUser) throw new Error('Not signed in');
-  const snap = await database.collection('studyCircles')
-    .where('joinCode', '==', code.toUpperCase())
-    .limit(1).get();
-  if (snap.empty) throw new Error('No circle found for that code.');
-  const doc = snap.docs[0];
-  return _joinCircle(doc.id, doc.data());
+  if (typeof getFirebaseIdToken !== 'function' || typeof privilegedBackendUrl !== 'function') {
+    throw new Error('Secure circle joining is unavailable.');
+  }
+  const token = await getFirebaseIdToken();
+  const response = await fetch(privilegedBackendUrl() + '/study-circles/join', {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload || {})
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.ok !== true) {
+    throw new Error(result.error || 'Circle could not be joined securely.');
+  }
+  _trackMembership(result.circleId, true);
+  return {
+    alreadyMember: !!result.alreadyMember,
+    circleId: result.circleId,
+    status: 'approved'
+  };
+}
+
+async function joinByCode(code) {
+  const normalized = String(code || '').trim().toUpperCase();
+  if (!/^[A-HJ-NP-Z2-9]{6}$/.test(normalized)) throw new Error('Enter a valid 6-character circle code.');
+  return _joinCircleBackend({ code: normalized });
 }
 
 async function joinPublic(circleId) {
-  const database = fcDb();
-  if (!database) throw new Error('Firebase not configured');
-  if (!currentUser) throw new Error('Not signed in');
-  const doc = await database.collection('studyCircles').doc(circleId).get();
-  if (!doc.exists) throw new Error('Circle not found.');
-  return _joinCircle(doc.id, doc.data());
-}
-
-async function _joinCircle(cid, data) {
-  const database = fcDb();
-  const memberRef = database.collection('studyCircles').doc(cid)
-    .collection('members').doc(currentUser.uid);
-  const existing = await memberRef.get();
-  if (existing.exists) return { alreadyMember: true, circleId: cid };
-  if (data.maxMembers && data.memberCount >= data.maxMembers) throw new Error('Circle is full.');
-  const batch = database.batch();
-  batch.set(memberRef, _memberProfile('member'));
-  batch.set(database.collection('studyCircles').doc(cid).collection('joinRequests').doc(currentUser.uid), {
-    status: 'approved', respondedAt: new Date().toISOString()
-  }, { merge: true });
-  batch.update(database.collection('studyCircles').doc(cid), {
-    memberCount: firebase.firestore.FieldValue.increment(1)
-  });
-  await batch.commit();
-  _trackMembership(cid, true);
-  return { alreadyMember: false, circleId: cid };
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(String(circleId || ''))) throw new Error('Invalid circle.');
+  return _joinCircleBackend({ circleId });
 }
 
 async function requestToJoin(circleId) {
@@ -129,9 +125,12 @@ async function requestToJoin(circleId) {
   ]);
   if (!circleDoc.exists) throw new Error('Circle not found.');
   if (memberDoc.exists) return { status: 'member', circleId };
-  if (!circleDoc.data().approvalRequired) {
-    const result = await _joinCircle(circleId, circleDoc.data());
-    return { ...result, status: 'approved' };
+  const circle = circleDoc.data() || {};
+  if (circle.visibility !== 'public') {
+    throw new Error('Private circles can only be joined with their invite code.');
+  }
+  if (!circle.approvalRequired) {
+    return _joinCircleBackend({ circleId });
   }
   await circleRef.collection('joinRequests').doc(currentUser.uid).set({
     uid: currentUser.uid,
@@ -244,11 +243,23 @@ async function leaveCircle(cid) {
 }
 
 async function setVisibility(cid, visibility) {
-  const database = fcDb();
-  if (!database) return;
-  await database.collection('studyCircles').doc(cid).update({
-    visibility: visibility === 'private' ? 'private' : 'public'
+  if (!currentUser) throw new Error('Not signed in');
+  const normalized = visibility === 'private' ? 'private' : 'public';
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(String(cid || ''))) throw new Error('Invalid circle.');
+  const token = await getFirebaseIdToken();
+  const response = await fetch(privilegedBackendUrl() + '/study-circles/visibility', {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ circleId: cid, visibility: normalized })
   });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.ok !== true) {
+    throw new Error(result.error || 'Circle visibility could not be changed securely.');
+  }
+  return result;
 }
 
 async function renameCircle(cid, name) {

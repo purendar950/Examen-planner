@@ -543,7 +543,8 @@ async function ezSubmitPayment() {
   const btn = document.querySelector('[onclick="ezSubmitPayment()"]');
   if (btn) { btn.disabled = true; btn.textContent = 'Uploading...'; }
   try {
-    let screenshotUrl = null;
+    let proofBase64 = null;
+    let proofContentType = null;
     const fileInput = document.getElementById('ez-ss-file');
     if (fileInput && fileInput.files && fileInput.files[0]) {
       const file = fileInput.files[0];
@@ -552,48 +553,44 @@ async function ezSubmitPayment() {
         if (btn) { btn.disabled = false; btn.textContent = 'Submit for Verification'; }
         return;
       }
-      const storageRef = firebase.storage().ref('payment_screenshots/' + currentUser.uid + '_' + Date.now());
-      const snap = await storageRef.put(file);
-      screenshotUrl = await snap.ref.getDownloadURL();
-    }
-    const payRef = await db.collection('payments').add({
-      uid: currentUser.uid, email: currentUser.email,
-      planId: _ezPickedPlan.id, planName: _ezPickedPlan.name,
-      amount: _ezFinalAmount, originalAmount: _ezPickedPlan.price || 0,
-      txnId: txn, screenshotUrl: screenshotUrl || null,
-      couponCode: _ezCoupon ? _ezCoupon.code : null,
-      couponPercent: _ezCoupon ? _ezCoupon.percentOff : null,
-      discountAmount: _ezCoupon ? _ezCoupon.discount : 0,
-      status: 'pending', createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    /* Log redemption + increment coupon usedCount atomically.
-       We only count redemptions when a payment was actually submitted, so abandoned
-       "Apply then close" attempts don't burn the code. */
-    if (_ezCoupon) {
-      try {
-        await db.collection('coupon_redemptions').add({
-          couponCode: _ezCoupon.code,
-          uid: currentUser.uid, email: currentUser.email,
-          planId: _ezPickedPlan.id, planName: _ezPickedPlan.name,
-          originalAmount: _ezPickedPlan.price || 0,
-          discountAmount: _ezCoupon.discount,
-          finalAmount: _ezFinalAmount,
-          paymentId: payRef.id,
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        await db.collection('coupons').doc(_ezCoupon.code).update({
-          usedCount: firebase.firestore.FieldValue.increment(1)
-        });
-        // Track per-user coupons used (for first-time-only enforcement)
-        try {
-          await db.collection('users').doc(currentUser.uid).update({
-            'profile.couponsUsed': firebase.firestore.FieldValue.arrayUnion(_ezCoupon.code)
-          });
-        } catch(e2) {}
-      } catch(couponErr) {
-        // Don't fail the whole submission if coupon log fails — admin will see discrepancy
-        console.warn('Coupon log failed:', couponErr);
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+        showToast('Screenshot JPG, PNG, ya WebP image hona chahiye.', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Submit for Verification'; }
+        return;
       }
+      proofContentType = file.type;
+      proofBase64 = await new Promise(function(resolve, reject) {
+        const reader = new FileReader();
+        reader.onload = function() {
+          const encoded = String(reader.result || '');
+          resolve(encoded.indexOf(',') >= 0 ? encoded.split(',')[1] : encoded);
+        };
+        reader.onerror = function() { reject(reader.error || new Error('Screenshot read failed.')); };
+        reader.readAsDataURL(file);
+      });
+    }
+    /* Commerce records and coupon counters are server-authoritative. The
+       backend derives the UID from the Firebase token and recomputes every
+       amount from the selected plan/coupon before creating a pending payment. */
+    const token = await getFirebaseIdToken();
+    const backendUrl = privilegedBackendUrl();
+    const response = await fetch(backendUrl + '/payments/submit', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        planId: _ezPickedPlan.id,
+        txnId: txn,
+        proofBase64: proofBase64,
+        proofContentType: proofContentType,
+        couponCode: _ezCoupon ? _ezCoupon.code : null
+      })
+    });
+    const result = await response.json().catch(function() { return {}; });
+    if (!response.ok || result.ok !== true) {
+      throw new Error(result.error || 'Payment submission could not be verified.');
     }
     showToast(_ezCoupon ? 'Payment submitted with ' + _ezCoupon.percentOff + '% off! Admin verify karega.' : 'Payment submitted! Admin verify karega aur plan activate hoga.', 'success');
     await ezLoadProfile();

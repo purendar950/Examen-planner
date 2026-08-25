@@ -15,31 +15,13 @@
    4. Left sidebar → Build → Firestore Database → "Create database"
       → "Start in production mode" → Select region "asia-south1" → Enable
 
-   5. Firestore → Rules tab mein ye paste karo:
-      ─────────────────────────────────────────
-      rules_version = '2';
-      service cloud.firestore {
-        match /databases/{database}/documents {
-          match /users/{userId} {
-            allow read, write: if request.auth != null
-                               && request.auth.uid == userId;
-          }
-          // User suggestions/requests (write-only for auth users)
-          match /requests/{docId} {
-            allow create: if request.auth != null;
-            allow read, update, delete: if false; // admin only via SDK
-          }
-          // App-wide config read by users (approval toggle, limits)
-          match /config/{docId} {
-            allow read: if request.auth != null;
-            allow write: if false; // admin only via SDK
-          }
-          // NOTE: For same-device detection to work, create a Firestore index:
-          // Collection: users | Field: profile.fp (Ascending) | Query scope: Collection
-        }
-      }
-      ─────────────────────────────────────────
-      → "Publish" karo
+   5. Deploy the version-controlled rules from the repository root:
+      firebase deploy --project syncstudy-3d734 --only firestore:rules,firestore:indexes,storage
+
+      Do not paste a permissive users/{uid} rule from an old setup guide.
+      firestore.rules freezes entitlement/approval fields, scopes user data,
+      and exposes only the public config allowlist. storage.rules restricts
+      payment screenshots by owner, MIME type and size.
 
    6. Project Settings (⚙️ gear icon) → "Your apps" section
       → "</>" (Web) icon click karo → App nickname dalo → Register app
@@ -51,9 +33,17 @@
    ══════════════════════════════════════════════════════════════ */
 const FIREBASE_CONFIG = window.PREPPATH_FIREBASE_CONFIG || {};
 
+/* Privileged account mutations always use the first-party backend. Never send
+   Firebase bearer tokens to a localStorage/user-controlled origin. */
+const PREPPATH_PRIVILEGED_BACKEND_URL = 'https://examen-planner-2.onrender.com';
+function privilegedBackendUrl() {
+  return PREPPATH_PRIVILEGED_BACKEND_URL;
+}
+
 /* ── CONFIG VALIDATION ──
-   Agar config fill nahi ki to app localStorage mode mein chalega
-   (sirf usi device pe data save hoga, sync nahi hoga) ── */
+   Authentication fails closed when this config is missing. Offline mode is
+   available only to a previously authenticated Firebase session; there is no
+   local password/account fallback. ── */
 const _configFilled = FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY"
                    && FIREBASE_CONFIG.projectId !== "YOUR_PROJECT_ID";
 
@@ -72,6 +62,9 @@ if (_configFilled) {
       }
     });
     _fbReady = true;
+    // Remove credentials left by pre-Firebase builds. They are never consulted
+    // again; retaining hashes/base64 passwords would only increase XSS impact.
+    try { localStorage.removeItem('ssc_users'); } catch (e) {}
     // Resolve only after Firebase Auth has restored (or rejected) the persisted
     // session. Backend routing awaits this before loading the Admin policy, so
     // the first request cannot leave on stale local routing during startup.
@@ -90,7 +83,7 @@ if (_configFilled) {
     _fbReady = false;
   }
 } else {
-  console.warn('⚠️ FIREBASE_CONFIG not set — running in localStorage-only mode.');
+  console.warn('⚠️ FIREBASE_CONFIG not set — authentication is disabled.');
   // Show a banner on auth screen after DOM is ready
   window.addEventListener('DOMContentLoaded', () => {
     const authCard = document.querySelector('.auth-card');
@@ -103,11 +96,9 @@ if (_configFilled) {
         'font-size:0.77rem','color:#F59E0B',
         'margin-bottom:1.2rem','line-height:1.6'
       ].join(';');
-      banner.innerHTML = '⚠️ <strong>Firebase Not Configured</strong><br>'
-        + 'Data sirf is device pe save hoga.<br>'
-        + 'Multi-device sync ke liye HTML file mein<br>'
-        + '<code style="font-size:0.72rem;opacity:0.8">FIREBASE_CONFIG</code>'
-        + ' mein apni project details bharo.';
+      banner.innerHTML = '⚠️ <strong>Authentication unavailable</strong><br>'
+        + 'Firebase configuration load nahi hui. Passwords local device par '
+        + 'store nahi kiye jaate. Connection/configuration fix karke app reopen karo.';
       authCard.insertBefore(banner, authCard.firstChild);
     }
   });
