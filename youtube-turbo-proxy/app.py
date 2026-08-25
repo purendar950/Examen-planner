@@ -30,6 +30,7 @@ import os
 import time
 import base64
 import gc
+import html
 import hashlib
 import hmac
 import threading
@@ -39,6 +40,8 @@ import math
 import concurrent.futures
 import ipaddress
 import urllib.parse
+import http.server
+import contextlib
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -122,6 +125,14 @@ def _ensure_cors_headers(response):
 
 
 MAX_TELEGRAM_IMAGE_BYTES = int(os.environ.get("MAX_TELEGRAM_IMAGE_BYTES", str(8 * 1024 * 1024)))
+FRAME_EXTRACT_TIMEOUT = max(10, int(os.environ.get("FRAME_EXTRACT_TIMEOUT", "60")))
+FRAME_REQUEST_TIMEOUT = max(20, min(85, int(os.environ.get("FRAME_REQUEST_TIMEOUT", "85"))))
+FRAME_QUEUE_TIMEOUT = max(1, int(os.environ.get("FRAME_QUEUE_TIMEOUT", "5")))
+FRAME_STATE_RESERVE_SECONDS = max(3, int(os.environ.get("FRAME_STATE_RESERVE_SECONDS", "8")))
+FRAME_CLAIM_LEASE_SECONDS = max(90, int(os.environ.get("FRAME_CLAIM_LEASE_SECONDS", "120")))
+FRAME_REQUEST_RETENTION_DAYS = max(1, int(os.environ.get("FRAME_REQUEST_RETENTION_DAYS", "30")))
+FRAME_MAX_WIDTH = max(320, min(1920, int(os.environ.get("FRAME_MAX_WIDTH", "1280"))))
+FRAME_MAX_TIMESTAMP = max(3600, int(os.environ.get("FRAME_MAX_TIMESTAMP", str(12 * 3600))))
 
 # ------------------------------------------------------------------ config
 import shutil
@@ -404,6 +415,27 @@ _cache_lock = threading.Lock()
 # Limit how many extractions (Deno subprocesses) run at once. 1 is safest for
 # 512MB / low-CPU free tiers; raise it on bigger instances via env.
 _extract_sem = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_EXTRACT", "1")))
+
+
+@contextlib.contextmanager
+def _semaphore_before_deadline(semaphore, deadline=None, max_wait=None):
+    """Acquire a process semaphore without letting frame requests queue forever."""
+    if deadline is None and max_wait is None:
+        semaphore.acquire()
+        acquired = True
+    else:
+        waits = []
+        if deadline is not None:
+            waits.append(max(0.0, deadline - time.monotonic()))
+        if max_wait is not None:
+            waits.append(max(0.0, float(max_wait)))
+        acquired = semaphore.acquire(timeout=min(waits))
+    if not acquired:
+        raise TimeoutError("Frame service is busy. Please try again.")
+    try:
+        yield
+    finally:
+        semaphore.release()
 
 # ---- transcript cache (captions) -----------------------------------------
 # Transcripts never change, so cache them long and GLOBALLY by videoId+lang.
@@ -998,7 +1030,7 @@ def _compact_extract(raw):
     }
 
 
-def _extract(video_id, force=False, cookie_retry_budget=None):
+def _extract(video_id, force=False, cookie_retry_budget=None, deadline=None):
     # Endpoints that can call _extract more than once share this mutable budget,
     # so one browser request can never trigger multiple cookie-less fallbacks.
     if cookie_retry_budget is None:
@@ -1013,7 +1045,7 @@ def _extract(video_id, force=False, cookie_retry_budget=None):
     # main memory/CPU spike. Serialize it so a burst of requests doesn't spawn
     # many Deno processes at once and OOM/CPU-starve small instances. Requests
     # queue instead of crashing the worker.
-    with _extract_sem:
+    with _semaphore_before_deadline(_extract_sem, deadline):
         # Re-check cache: another thread may have populated it while we waited.
         with _cache_lock:
             hit = _cache.get(video_id)
@@ -15835,6 +15867,9 @@ def api_stream():
 
 _photo_rate = {}          # chatId -> [timestamps]  (simple in-memory limiter)
 _photo_rate_lock = threading.Lock()
+# One FFmpeg frame extraction at a time protects small Render/phone instances
+# from CPU and memory spikes while yt-dlp/PO-token work may also be running.
+_frame_extract_sem = threading.Semaphore(max(1, int(os.environ.get("MAX_CONCURRENT_FRAME_EXTRACT", "1"))))
 
 
 def _photo_rate_limited(chat_id, limit=6, window=60):
@@ -16243,71 +16278,596 @@ def api_report_webhook():
     return jsonify({"ok": True})
 
 
+def _telegram_photo_context(user):
+    """Resolve and rate-limit one authenticated user's Telegram destination."""
+    chat_id = _telegram_chat_for_user(user)
+    if not chat_id:
+        return None, ({"ok": False, "error": "Connect a Telegram chat in your profile first."}, 400)
+    if _photo_rate_limited(user["uid"]):
+        return None, ({"ok": False, "error": "Too many screenshots — ek minute baad try karo."}, 429)
+    token = _telegram_token()
+    if not token:
+        return None, ({"ok": False, "error": "bot token not configured (config/telegram.botToken)"}, 500)
+
+    payload = {"chat_id": chat_id, "parse_mode": "HTML"}
+    route = _group_route(chat_id)
+    if route:
+        payload["chat_id"] = route["groupId"]
+        payload["message_thread_id"] = route["topicId"]
+    return {"token": token, "payload": payload}, None
+
+
+def _deliver_telegram_photo(user, context, image, caption, filename, source, deadline=None):
+    """Send trusted image bytes and persist the authenticated owner mapping."""
+    if not image:
+        return {"ok": False, "error": "empty image"}, 400
+    if len(image) > MAX_TELEGRAM_IMAGE_BYTES:
+        return {"ok": False, "error": "image too large"}, 413
+    if not (image.startswith(b"\xff\xd8\xff") or image.startswith(b"\x89PNG\r\n\x1a\n")
+            or image.startswith(b"RIFF") and image[8:12] == b"WEBP"):
+        return {"ok": False, "error": "unsupported image format"}, 400
+
+    payload = dict(context["payload"])
+    payload["caption"] = str(caption or "")[:1024]
+    if deadline is not None and deadline <= time.monotonic():
+        return {"ok": False, "error": "Frame request timed out before Telegram delivery."}, 504
+    try:
+        response = requests.post(
+            "https://api.telegram.org/bot%s/sendPhoto" % context["token"],
+            data=payload,
+            files={"photo": (filename, image, "image/jpeg")},
+            timeout=(min(REQUEST_TIMEOUT, max(0.1, deadline - time.monotonic()))
+                     if deadline is not None else REQUEST_TIMEOUT),
+        )
+        result = response.json()
+        if not result.get("ok"):
+            return {"ok": False, "error": result.get("description") or ("HTTP " + str(response.status_code))}, 400
+        photos = ((result.get("result") or {}).get("photo") or [])
+        file_id = photos[-1].get("file_id", "") if photos else ""
+        if file_id and not _remember_telegram_file_owner(user["uid"], file_id, source):
+            log.error("Telegram photo delivered but media ownership could not be saved for uid=%s", user["uid"])
+            file_id = ""
+        log.info("Telegram photo → %s (%d bytes, source=%s, file_id=%s)",
+                 payload["chat_id"], len(image), source, file_id[:12])
+        return {"ok": True, "fileId": file_id}, 200
+    except Exception as exc:  # noqa: BLE001
+        log.warning("sendPhoto relay failed: %s", exc)
+        return {"ok": False, "error": str(exc)[:200]}, 502
+
+
+def _frame_time_label(seconds):
+    total = max(0, int(seconds or 0))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return ("%d:%02d:%02d" % (hours, minutes, secs)) if hours else ("%d:%02d" % (minutes, secs))
+
+
+def _frame_request_fingerprint(video_id, timestamp):
+    value = "%s\n%.6f" % (video_id, timestamp)
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _frame_request_expiry():
+    return datetime.now(timezone.utc) + timedelta(days=FRAME_REQUEST_RETENTION_DAYS)
+
+
+def _prune_expired_frame_requests():
+    """Drain all expired request records; called at boot and every hour."""
+    if not _fb_db:
+        return
+    total = 0
+    try:
+        while True:
+            query = (_fb_db.collection("telegram_frame_requests")
+                     .where("expiresAt", "<=", datetime.now(timezone.utc)).limit(250))
+            expired = list(query.stream())
+            if not expired:
+                break
+            batch = _fb_db.batch()
+            for snapshot in expired:
+                batch.delete(snapshot.reference)
+            batch.commit()
+            total += len(expired)
+            if len(expired) < 250:
+                break
+        if total:
+            log.info("Pruned %d expired Telegram frame request records", total)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Telegram frame request cleanup failed: %s", exc)
+
+
+def _frame_request_cleanup_loop():
+    while True:
+        _prune_expired_frame_requests()
+        time.sleep(3600)
+
+
+if _fb_db:
+    threading.Thread(
+        target=_frame_request_cleanup_loop,
+        name="frame-request-cleanup",
+        daemon=True,
+    ).start()
+
+
+def _claim_frame_request(uid, request_id, fingerprint):
+    """Atomically own or safely reclaim one pre-Telegram frame operation."""
+    if not _fb_db:
+        return "unavailable", None, None
+    from firebase_admin import firestore
+    doc_id = hashlib.sha256((uid + "\n" + request_id).encode("utf-8")).hexdigest()
+    ref = _fb_db.collection("telegram_frame_requests").document(doc_id)
+    owner_token = secrets.token_urlsafe(24)
+    now = datetime.now(timezone.utc)
+    lease_until = now + timedelta(seconds=FRAME_CLAIM_LEASE_SECONDS)
+    claim_context = {"ref": ref, "ownerToken": owner_token}
+    try:
+        ref.create({
+            "ownerUid": uid,
+            "requestId": request_id,
+            "fingerprint": fingerprint,
+            "state": "claimed",
+            "ownerToken": owner_token,
+            "leaseUntil": lease_until,
+            # Firestore TTL can target this field; the retention window is much
+            # longer than any browser retry while preventing unbounded growth.
+            "expiresAt": _frame_request_expiry(),
+            "createdAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+        return "claimed", claim_context, None
+    except Exception as create_error:  # noqa: BLE001
+        @firestore.transactional
+        def inspect_or_reclaim(transaction):
+            snap = ref.get(transaction=transaction)
+            existing = snap.to_dict() if snap.exists else None
+            if not existing:
+                return "unavailable", None
+            if (existing.get("ownerUid") != uid or existing.get("requestId") != request_id
+                    or existing.get("fingerprint") != fingerprint):
+                return "conflict", existing
+            state = str(existing.get("state") or "")
+            if state in ("completed", "failed"):
+                return state, existing
+            existing_lease = existing.get("leaseUntil")
+            if (state == "claimed" and isinstance(existing_lease, datetime)
+                    and existing_lease <= now):
+                transaction.update(ref, {
+                    "ownerToken": owner_token,
+                    "leaseUntil": lease_until,
+                    "expiresAt": _frame_request_expiry(),
+                    "updatedAt": firestore.SERVER_TIMESTAMP,
+                })
+                return "claimed", existing
+            # `sending` is never reclaimed: Telegram may have accepted it even
+            # if this service crashed before persisting the response.
+            return "pending", existing
+
+        try:
+            outcome, existing = inspect_or_reclaim(_fb_db.transaction())
+            return outcome, claim_context if outcome == "claimed" else {"ref": ref}, existing
+        except Exception as read_error:  # noqa: BLE001
+            log.warning("Frame idempotency claim/read failed: %s / %s", create_error, read_error)
+            return "unavailable", {"ref": ref}, None
+
+
+def _update_frame_request(claim_context, state, **fields):
+    if not claim_context or not claim_context.get("ref") or not claim_context.get("ownerToken"):
+        return False
+    from firebase_admin import firestore
+    ref = claim_context["ref"]
+    owner_token = claim_context["ownerToken"]
+
+    @firestore.transactional
+    def apply(transaction):
+        snap = ref.get(transaction=transaction)
+        existing = snap.to_dict() if snap.exists else {}
+        if existing.get("ownerToken") != owner_token:
+            return False
+        current = str(existing.get("state") or "")
+        allowed = {
+            "sending": ("claimed",),
+            "completed": ("sending",),
+            "failed": ("claimed", "sending"),
+        }
+        if current not in allowed.get(state, ()):
+            return False
+        value = dict(fields)
+        value.update({
+            "state": state,
+            "expiresAt": _frame_request_expiry(),
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+        transaction.update(ref, value)
+        return True
+
+    try:
+        return bool(apply(_fb_db.transaction()))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Frame idempotency state update to %s failed: %s", state, exc)
+        return False
+
+
+def _finish_frame_request(claim_context, result, status):
+    state = "completed" if result.get("ok") else "failed"
+    return _update_frame_request(claim_context, state, response=dict(result), status=int(status))
+
+
+def _finish_frame_request_async(claim_context, result, status):
+    threading.Thread(
+        target=_finish_frame_request,
+        args=(claim_context, dict(result), int(status)),
+        name="frame-request-finish",
+        daemon=True,
+    ).start()
+
+
+def _remaining_frame_time(deadline, cap=None):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("Frame request timed out.")
+    return min(remaining, cap) if cap is not None else remaining
+
+
+# yt-dlp has per-socket timeouts but no total wall-clock timeout. Keep it off
+# the Gunicorn request thread so the 85-second frame budget remains absolute;
+# an overrun may finish warming the cache, but can never proceed to Telegram.
+_frame_metadata_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="frame-metadata")
+
+
+def _extract_for_frame(video_id, deadline, force=False, cookie_retry_budget=None):
+    future = _frame_metadata_executor.submit(
+        _extract, video_id, force, cookie_retry_budget, deadline)
+    try:
+        return future.result(timeout=_remaining_frame_time(deadline))
+    except concurrent.futures.TimeoutError as exc:
+        future.cancel()
+        raise TimeoutError("YouTube metadata extraction timed out.") from exc
+
+
+def _open_format_window(stream_format, first_byte, last_byte, timeout):
+    headers = _safe_stream_request_headers(stream_format.get("http_headers"))
+    headers["Range"] = "bytes=%d-%d" % (first_byte, last_byte)
+    return requests.get(stream_format["url"], headers=headers, stream=True, timeout=timeout)
+
+
+class _FrameRangeServer(http.server.ThreadingHTTPServer):
+    """Private seekable adapter from FFmpeg to bounded googlevideo windows."""
+
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, stream_format, video_id, itag, deadline):
+        self.stream_format = stream_format
+        self.video_id = video_id
+        self.itag = itag
+        self.deadline = deadline
+        self.capability_path = "/frame-" + secrets.token_urlsafe(24)
+        self._refresh_lock = threading.Lock()
+        self._refreshed = False
+        super().__init__(("127.0.0.1", 0), _FrameRangeHandler)
+
+    def open_window(self, first_byte, last_byte):
+        current_format = self.stream_format
+        upstream = _open_format_window(
+            current_format, first_byte, last_byte,
+            _remaining_frame_time(self.deadline, REQUEST_TIMEOUT),
+        )
+        if upstream.status_code not in (403, 410):
+            return upstream
+        upstream.close()
+        with self._refresh_lock:
+            if not self._refreshed:
+                _, compact = _extract_for_frame(
+                    self.video_id, self.deadline, force=True,
+                    cookie_retry_budget={"remaining": 1},
+                )
+                refreshed = _direct_format(compact, self.itag)
+                if not refreshed:
+                    raise RuntimeError("Video stream disappeared during frame extraction.")
+                self.stream_format = refreshed
+                self._refreshed = True
+            current_format = self.stream_format
+        return _open_format_window(
+            current_format, first_byte, last_byte,
+            _remaining_frame_time(self.deadline, REQUEST_TIMEOUT),
+        )
+
+
+class _FrameRangeHandler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, _format, *_args):
+        return
+
+    def do_HEAD(self):  # noqa: N802
+        self._serve(send_body=False)
+
+    def do_GET(self):  # noqa: N802
+        self._serve(send_body=True)
+
+    def _serve(self, send_body):
+        if urllib.parse.urlsplit(self.path).path != self.server.capability_path:
+            self.send_error(404)
+            return
+        wants_range = bool(self.headers.get("Range"))
+        start, requested_end = _parse_browser_range(self.headers.get("Range"))
+        if start is None:
+            self.send_response(416)
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        def window_end(position, final_end=None):
+            value = position + STREAM_CHUNK_BYTES - 1
+            return min(value, final_end) if final_end is not None else value
+
+        upstream = None
+        try:
+            upstream = self.server.open_window(start, window_end(start, requested_end))
+            if upstream.status_code >= 400:
+                status = upstream.status_code
+                upstream.close()
+                upstream = None
+                self.send_error(status)
+                return
+            total_size = _content_range_total(upstream.headers.get("Content-Range"))
+            end = requested_end if requested_end is not None else (
+                total_size - 1 if total_size else None)
+            if end is not None and end < start:
+                upstream.close()
+                upstream = None
+                self.send_response(416)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+
+            self.send_response(206 if wants_range else 200)
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Type", upstream.headers.get("Content-Type", "video/mp4"))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            if end is not None:
+                self.send_header("Content-Length", str(end - start + 1))
+            if wants_range and total_size and end is not None:
+                self.send_header("Content-Range", "bytes %d-%d/%d" % (start, end, total_size))
+            self.end_headers()
+            if not send_body:
+                upstream.close()
+                upstream = None
+                return
+
+            position = start
+            while upstream is not None:
+                delivered = 0
+                for chunk in upstream.iter_content(chunk_size=64 * 1024):
+                    if not chunk:
+                        continue
+                    if end is not None and position + len(chunk) - 1 > end:
+                        chunk = chunk[:end - position + 1]
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    delivered += len(chunk)
+                    position += len(chunk)
+                    if end is not None and position > end:
+                        break
+                upstream.close()
+                upstream = None
+                if not delivered or end is None or position > end:
+                    return
+                upstream = self.server.open_window(position, window_end(position, end))
+                if upstream.status_code >= 400:
+                    return
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Private frame stream failed for %s: %s", self.server.video_id, exc)
+        finally:
+            if upstream is not None:
+                upstream.close()
+            self.close_connection = True
+
+
+def _extract_current_frame(video_id, timestamp, deadline=None):
+    """Extract one JPEG through a dedicated loopback range adapter.
+
+    The private adapter owns its listener thread and talks directly to the
+    server-resolved googlevideo format in bounded windows. FFmpeg therefore
+    keeps seekable HTTP semantics without calling Gunicorn's `/api/stream` or
+    consuming the only spare web thread in the default deployment.
+    """
+    deadline = deadline or (time.monotonic() + FRAME_REQUEST_TIMEOUT)
+    with _semaphore_before_deadline(
+            _frame_extract_sem, deadline, max_wait=FRAME_QUEUE_TIMEOUT):
+        info, compact = _extract_for_frame(
+            video_id, deadline, cookie_retry_budget={"remaining": 1})
+        formats = info.get("formats") or []
+        if not formats:
+            raise ValueError("No progressive video stream is available for this video.")
+
+        duration = float(info.get("duration") or 0)
+        frame_at = float(timestamp)
+        if duration > 0:
+            if frame_at > duration + 2:
+                raise ValueError("Timestamp is outside this video.")
+            frame_at = min(frame_at, max(0, duration - 0.05))
+
+        itag = str(formats[0].get("itag") or "").strip()
+        stream_format = _direct_format(compact, itag)
+        if not itag or not stream_format:
+            raise ValueError("No progressive video stream is available for this video.")
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            raise RuntimeError("FFmpeg is not installed on the media server.")
+
+        range_server = _FrameRangeServer(stream_format, video_id, itag, deadline)
+        range_thread = threading.Thread(
+            target=range_server.serve_forever,
+            kwargs={"poll_interval": 0.1},
+            name="frame-range-adapter",
+            daemon=True,
+        )
+        range_thread.start()
+        try:
+            host, port = range_server.server_address
+            stream_url = "http://%s:%d%s" % (host, port, range_server.capability_path)
+            with tempfile.TemporaryDirectory(prefix="examzen-frame-") as temp_dir:
+                output_path = os.path.join(temp_dir, "frame.jpg")
+                process_timeout = _remaining_frame_time(deadline, FRAME_EXTRACT_TIMEOUT)
+                command = [
+                    ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error",
+                    "-rw_timeout", str(max(1, int(process_timeout * 1000000))),
+                    "-ss", "%.3f" % frame_at,
+                    "-i", stream_url,
+                    "-frames:v", "1", "-an", "-sn", "-dn", "-threads", "1",
+                    "-vf", "scale=min(iw\\,%d):-2" % FRAME_MAX_WIDTH,
+                    "-q:v", "3", "-y", output_path,
+                ]
+                try:
+                    completed = subprocess.run(
+                        command,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.PIPE,
+                        timeout=process_timeout,
+                        check=False,
+                    )
+                except subprocess.TimeoutExpired as exc:
+                    raise TimeoutError("Frame extraction timed out.") from exc
+                if completed.returncode != 0 or not os.path.isfile(output_path):
+                    detail = (completed.stderr or b"").decode("utf-8", "replace").strip()
+                    log.warning("Frame extraction failed for %s at %.3fs: %s",
+                                video_id, frame_at, detail[-500:])
+                    raise RuntimeError("Could not extract this video frame.")
+                with open(output_path, "rb") as handle:
+                    image = handle.read(MAX_TELEGRAM_IMAGE_BYTES + 1)
+        finally:
+            range_server.shutdown()
+            range_server.server_close()
+            range_thread.join(timeout=1)
+
+    if len(image) > MAX_TELEGRAM_IMAGE_BYTES:
+        raise ValueError("Extracted frame is too large.")
+    return image, str(info.get("title") or "YouTube video")[:300], frame_at
+
+
 @app.post("/send-photo")
 def api_send_photo():
     user, err = _verified_user_record(require_pro=True)
     if err:
         return jsonify(err[0]), err[1]
-    data = request.get_json(silent=True) or {}
-    chat_id = _telegram_chat_for_user(user)
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "A JSON object is required."}), 400
     image_b64 = data.get("imageBase64") or ""
     caption = (data.get("caption") or "")[:1024]
-
-    if not chat_id:
-        return jsonify({"ok": False, "error": "Connect a Telegram chat in your profile first."}), 400
     if not image_b64:
         return jsonify({"ok": False, "error": "imageBase64 required"}), 400
-    if _photo_rate_limited(user["uid"]):
-        return jsonify({"ok": False, "error": "Too many screenshots — ek minute baad try karo."}), 429
 
-    token = _telegram_token()
-    if not token:
-        return jsonify({"ok": False, "error": "bot token not configured (config/telegram.botToken)"}), 500
-
+    context, context_error = _telegram_photo_context(user)
+    if context_error:
+        return jsonify(context_error[0]), context_error[1]
     try:
-        img = base64.b64decode(image_b64, validate=True)
+        image = base64.b64decode(image_b64, validate=True)
     except Exception:  # noqa: BLE001
         return jsonify({"ok": False, "error": "bad base64 image"}), 400
-    if not img:
-        return jsonify({"ok": False, "error": "empty image"}), 400
-    if len(img) > MAX_TELEGRAM_IMAGE_BYTES:
-        return jsonify({"ok": False, "error": "image too large"}), 413
-    if not (img.startswith(b"\xff\xd8\xff") or img.startswith(b"\x89PNG\r\n\x1a\n")
-            or img.startswith(b"RIFF") and img[8:12] == b"WEBP"):
-        return jsonify({"ok": False, "error": "unsupported image format"}), 400
+    result, status = _deliver_telegram_photo(
+        user, context, image, caption, "turbo-frame.jpg", "turbo-relay")
+    return jsonify(result), status
 
-    # Route to the user's group "📸 Images" topic if they ran /setup, else DM.
-    payload = {"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"}
-    route = _group_route(chat_id)
-    if route:
-        payload["chat_id"] = route["groupId"]
-        payload["message_thread_id"] = route["topicId"]
 
+@app.post("/send-current-frame")
+def api_send_current_frame():
+    """Extract and send one idempotent, server-owned YouTube frame request."""
+    deadline = time.monotonic() + FRAME_REQUEST_TIMEOUT
+    operation_deadline = deadline - FRAME_STATE_RESERVE_SECONDS
+    user, err = _verified_user_record(require_pro=True)
+    if err:
+        return jsonify(err[0]), err[1]
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "A JSON object is required."}), 400
+    video_id = str(data.get("videoId") or "").strip()
+    request_id = str(data.get("requestId") or "").strip()
+    raw_timestamp = data.get("timestamp")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+        return jsonify({"ok": False, "error": "A valid 11-character videoId is required."}), 400
+    if not re.fullmatch(r"[A-Za-z0-9_-]{20,80}", request_id):
+        return jsonify({"ok": False, "error": "A valid requestId is required."}), 400
+    if isinstance(raw_timestamp, bool):
+        return jsonify({"ok": False, "error": "A valid timestamp is required."}), 400
     try:
-        r = requests.post(
-            "https://api.telegram.org/bot%s/sendPhoto" % token,
-            data=payload,
-            files={"photo": ("turbo-frame.jpg", img, "image/jpeg")},
-            timeout=REQUEST_TIMEOUT,
-        )
-        j = r.json()
-        if not j.get("ok"):
-            return jsonify({"ok": False, "error": j.get("description") or ("HTTP " + str(r.status_code))}), 400
-        # Return the largest PhotoSize's file_id so the app can store a
-        # lightweight reference (no image bytes) and display it later via
-        # /tg-photo. Telegram hosts the actual image, permanently.
-        photos = ((j.get("result") or {}).get("photo") or [])
-        file_id = photos[-1].get("file_id", "") if photos else ""
-        # Do not hand a browser a retrievable file reference until the trusted
-        # owner mapping exists. The photo was delivered even if this write fails.
-        if file_id and not _remember_telegram_file_owner(user["uid"], file_id, "turbo-relay"):
-            log.error("send-photo delivered but could not persist media owner for uid=%s", user["uid"])
-            file_id = ""
-        log.info("send-photo → %s (%d bytes, file_id=%s)", payload["chat_id"], len(img), file_id[:12])
-        return jsonify({"ok": True, "fileId": file_id})
+        timestamp = float(raw_timestamp)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "A valid timestamp is required."}), 400
+    if not math.isfinite(timestamp) or timestamp < 0 or timestamp > FRAME_MAX_TIMESTAMP:
+        return jsonify({"ok": False, "error": "Timestamp is outside the supported range."}), 400
+
+    fingerprint = _frame_request_fingerprint(video_id, timestamp)
+    claim, request_ref, existing = _claim_frame_request(user["uid"], request_id, fingerprint)
+    if claim == "completed":
+        result = dict(existing.get("response") or {})
+        return jsonify(result), int(existing.get("status") or 200)
+    if claim == "failed":
+        result = dict(existing.get("response") or {"ok": False, "error": "This frame request failed."})
+        return jsonify(result), int(existing.get("status") or 502)
+    if claim == "conflict":
+        return jsonify({"ok": False, "error": "requestId was already used for different frame coordinates."}), 409
+    if claim == "pending":
+        return jsonify({"ok": False, "error": "This frame request is already being processed."}), 409
+    if claim != "claimed":
+        return jsonify({"ok": False, "error": "Frame request coordination is temporarily unavailable."}), 503
+
+    def fail(message, status):
+        result = {"ok": False, "error": str(message)[:200]}
+        # Failure persistence must not make an exhausted operation overrun the
+        # browser budget. The still-claimed record blocks/replays meanwhile.
+        if time.monotonic() >= operation_deadline:
+            _finish_frame_request_async(request_ref, result, status)
+        else:
+            _finish_frame_request(request_ref, result, status)
+        return jsonify(result), status
+
+    # Resolve destination and rate limit only after this server atomically owns
+    # the request. Retries replay state instead of consuming quota or sending.
+    context, context_error = _telegram_photo_context(user)
+    if context_error:
+        return fail(context_error[0].get("error") or "Telegram destination unavailable.", context_error[1])
+    try:
+        image, title, frame_at = _extract_current_frame(
+            video_id, timestamp, deadline=operation_deadline)
+    except ValueError as exc:
+        return fail(exc, 400)
+    except TimeoutError as exc:
+        return fail(exc, 504)
+    except yt_dlp.utils.DownloadError as exc:
+        log.warning("YouTube frame extraction failed for %s: %s", video_id, exc)
+        return fail("YouTube could not provide this video frame.", 502)
     except Exception as exc:  # noqa: BLE001
-        log.warning("sendPhoto relay failed: %s", exc)
-        return jsonify({"ok": False, "error": str(exc)[:200]}), 502
+        log.warning("Current-frame extraction failed for %s: %s", video_id, exc)
+        return fail(str(exc)[:200] or "Frame extraction failed.", 502)
+
+    # Persist `sending` before crossing Telegram's non-transactional boundary.
+    # If this write fails we fail closed; a duplicate must never send elsewhere.
+    if not _update_frame_request(request_ref, "sending"):
+        return jsonify({"ok": False, "error": "Could not safely start Telegram delivery."}), 503
+    caption = "📸 <b>%s</b>\n⏱ %s  ·  YouTube" % (
+        html.escape(title, quote=False), _frame_time_label(frame_at))
+    result, status = _deliver_telegram_photo(
+        user, context, image, caption, "youtube-frame.jpg", "iframe-frame-relay",
+        deadline=operation_deadline)
+    if result.get("ok"):
+        result.update({
+            "videoId": video_id,
+            "timestamp": frame_at,
+            "title": title,
+        })
+    # A failed completion write intentionally leaves state as `sending`; this
+    # blocks ambiguous retries rather than risking a duplicate Telegram photo.
+    _finish_frame_request(request_ref, result, status)
+    return jsonify(result), status
 
 
 @app.get("/tg-photo")
@@ -16373,7 +16933,7 @@ def index():
                       "/api/transcript?id=VIDEOID&lang=en", "/transcript-demo",
                       "/api/study?id=VIDEOID&mode=notes&out=English", "/study-demo",
                       "/api/tutor?id=VIDEOID&q=...&out=English", "/api/status?id=VIDEOID",
-                      "/send-photo",
+                      "/send-photo", "/send-current-frame",
                       "/tg-photo?file_id=..."],
     })
 
