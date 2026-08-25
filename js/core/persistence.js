@@ -64,6 +64,148 @@ function _storageService() {
   return null;
 }
 
+/* ── Merge-safe YouTube state helpers ──
+   The implementation lives in src/shared/youtubeSync.js so the UI and the
+   Firestore transaction use exactly the same metadata/materialization rules. */
+function _youtubeSyncService() {
+  const mods = window.PrepPathModules;
+  return mods && mods.youtubeSync ? mods.youtubeSync : null;
+}
+
+function normalizeYouTubeSyncState(state) {
+  const svc = _youtubeSyncService();
+  if (svc && typeof svc.normalizeYouTubeSyncState === 'function') {
+    return svc.normalizeYouTubeSyncState(state || appState);
+  }
+  return state || appState;
+}
+
+function mergeYouTubeSyncState(localState, remoteState) {
+  const svc = _youtubeSyncService();
+  if (svc && typeof svc.mergeYouTubeSyncState === 'function') {
+    return svc.mergeYouTubeSyncState(localState, remoteState);
+  }
+  // The module is loaded before app startup in normal builds. If it failed,
+  // prefer local state rather than destructively replacing unsynced progress.
+  return localState || remoteState || {};
+}
+
+function setYouTubeVideoWatched(scope, videoId, watched, updatedAt) {
+  scope = scope || '_single';
+  const svc = _youtubeSyncService();
+  if (svc && typeof svc.setYouTubeVideoWatched === 'function') {
+    return svc.setYouTubeVideoWatched(appState, scope, videoId, watched, updatedAt);
+  }
+  if (!videoId) return false;
+  appState.ytSync = appState.ytSync || { watched: {}, progress: {} };
+  appState.ytSync.watched = appState.ytSync.watched || {};
+  appState.ytSync.watched[scope] = appState.ytSync.watched[scope] || {};
+  const previous = appState.ytSync.watched[scope][videoId];
+  const timestamp = Math.max(Date.now(), Number(updatedAt) || 0, Number(previous && previous.updatedAt) + 1 || 0);
+  appState.ytSync.watched[scope][videoId] = { watched: !!watched, updatedAt: timestamp, pending: true };
+  appState.ytWatched = appState.ytWatched || {};
+  appState.ytWatched[scope] = appState.ytWatched[scope] || {};
+  if (watched) appState.ytWatched[scope][videoId] = true;
+  else delete appState.ytWatched[scope][videoId];
+  const course = appState.ytoLibrary && appState.ytoLibrary[scope];
+  if (course) {
+    course.watched = course.watched || {};
+    if (watched) course.watched[videoId] = true;
+    else delete course.watched[videoId];
+  }
+  return true;
+}
+
+function setYouTubeVideoProgress(scope, videoId, seconds, percent, updatedAt) {
+  scope = scope || '_single';
+  const svc = _youtubeSyncService();
+  if (svc && typeof svc.setYouTubeVideoProgress === 'function') {
+    return svc.setYouTubeVideoProgress(appState, scope, videoId, seconds, percent, updatedAt);
+  }
+  if (!videoId) return false;
+  appState.ytSync = appState.ytSync || { watched: {}, progress: {} };
+  appState.ytSync.progress = appState.ytSync.progress || {};
+  appState.ytSync.progress[scope] = appState.ytSync.progress[scope] || {};
+  const previous = appState.ytSync.progress[scope][videoId];
+  const legacyPercent = appState.ytVidProgress && appState.ytVidProgress[scope]
+    ? appState.ytVidProgress[scope][videoId] : 0;
+  const nextPercent = percent == null
+    ? (previous ? Number(previous.percent) || 0 : Number(legacyPercent) || 0)
+    : Number(percent) || 0;
+  const timestamp = Math.max(Date.now(), Number(updatedAt) || 0, Number(previous && previous.updatedAt) + 1 || 0);
+  appState.ytSync.progress[scope][videoId] = {
+    seconds: Math.max(0, Number(seconds) || 0), percent: Math.max(0, Math.min(100, nextPercent)),
+    updatedAt: timestamp, pending: true
+  };
+  appState.ytVidTime = appState.ytVidTime || {};
+  appState.ytVidProgress = appState.ytVidProgress || {};
+  appState.ytVidTime[scope] = appState.ytVidTime[scope] || {};
+  appState.ytVidProgress[scope] = appState.ytVidProgress[scope] || {};
+  appState.ytVidTime[scope][videoId] = Math.max(0, Number(seconds) || 0);
+  appState.ytVidProgress[scope][videoId] = Math.max(0, Math.min(100, nextPercent));
+  return true;
+}
+
+function setYouTubeLastVideo(video, updatedAt) {
+  const svc = _youtubeSyncService();
+  if (svc && typeof svc.setYouTubeLastVideo === 'function') {
+    return svc.setYouTubeLastVideo(appState, video, updatedAt);
+  }
+  if (!video || !video.id) return false;
+  const previous = Number(appState.ytLastVideo && appState.ytLastVideo.updatedAt) || 0;
+  appState.ytLastVideo = Object.assign({}, video, {
+    updatedAt: Math.max(Date.now(), Number(updatedAt) || 0, previous + 1), pending: true
+  });
+  return true;
+}
+
+function applyMergedYouTubeState(target, source) {
+  if (!target || !source) return target;
+  ['ytSync', 'ytWatched', 'ytVidTime', 'ytVidProgress', 'ytLastVideo'].forEach(function(key) {
+    if (typeof source[key] !== 'undefined') target[key] = source[key];
+  });
+  if (source.ytoLibrary && typeof source.ytoLibrary === 'object') {
+    if (!target.ytoLibrary || typeof target.ytoLibrary !== 'object') target.ytoLibrary = {};
+    Object.keys(source.ytoLibrary).forEach(function(courseId) {
+      const remoteCourse = source.ytoLibrary[courseId];
+      if (!target.ytoLibrary[courseId]) target.ytoLibrary[courseId] = remoteCourse;
+      else if (remoteCourse && remoteCourse.watched) target.ytoLibrary[courseId].watched = remoteCourse.watched;
+    });
+  }
+  return normalizeYouTubeSyncState(target);
+}
+
+function resolveFallbackYouTubePending(state) {
+  const resolved = JSON.parse(JSON.stringify(state || {}));
+  const sync = resolved.ytSync || {};
+  ['watched', 'progress'].forEach(function(kind) {
+    const scopes = sync[kind] || {};
+    Object.keys(scopes).forEach(function(scope) {
+      Object.keys(scopes[scope] || {}).forEach(function(videoId) {
+        const record = scopes[scope][videoId];
+        if (record && typeof record === 'object') delete record.pending;
+      });
+    });
+  });
+  if (resolved.ytLastVideo && typeof resolved.ytLastVideo === 'object') delete resolved.ytLastVideo.pending;
+  return resolved;
+}
+
+function refreshYouTubeSyncUi() {
+  try {
+    if (typeof ytoCurrentPl !== 'undefined' && ytoCurrentPl && typeof ytoPopulateYtSidebar === 'function') {
+      ytoPopulateYtSidebar(ytoCurrentPl, typeof ytCurrentVideoId !== 'undefined' ? ytCurrentVideoId : null);
+    } else if (typeof ytCurrentPlaylistId !== 'undefined' && ytCurrentPlaylistId) {
+      if (typeof ytVideoWatched !== 'undefined') {
+        ytVideoWatched = (appState.ytWatched && appState.ytWatched[ytCurrentPlaylistId]) || {};
+      }
+      if (typeof ytRenderVideoList === 'function') ytRenderVideoList();
+      if (typeof ytUpdatePlaylistProgress === 'function') ytUpdatePlaylistProgress();
+      if (typeof ytUpdateRemaining === 'function') ytUpdateRemaining();
+    }
+  } catch(e) {}
+}
+
 function saveProgress() {
   if (!currentUser) return;
 
@@ -279,18 +421,19 @@ async function saveProgressNow() {
 
   try {
     const svc = _storageService();
+    let savedState = firestorePayload;
     // Only the Firestore write needs the sanitized shape — local cache/queue
     // writes above already used stateToSave as-is. The payload was built for
     // the size check above and is reused here to keep both decisions identical.
     if (svc) {
-      await svc.saveUserState(saveUid, firestorePayload);
+      savedState = await svc.saveUserState(saveUid, firestorePayload) || firestorePayload;
     } else {
-      // Mirrors storageService.saveUserState: appState must REPLACE its field,
-      // because a merge:true write cannot express a deleted key and would keep
-      // resurrecting locally deleted playlists/tasks on the next snapshot.
+      // Compatibility path if the module failed to load. Normal builds use the
+      // transaction in storageService, which merges per-video sync metadata.
       const ref = db.collection('users').doc(saveUid);
+      const fallbackState = resolveFallbackYouTubePending(firestorePayload);
       const payload = {
-        appState: firestorePayload,
+        appState: fallbackState,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       };
       try {
@@ -299,14 +442,30 @@ async function saveProgressNow() {
         if (err && err.code === 'not-found') await ref.set(payload, { merge: true });
         else throw err;
       }
+      savedState = fallbackState;
     }
 
-    _lastSavedJSON = json;
+    const unchangedDuringWrite = currentUser && currentUser.uid === saveUid && JSON.stringify(appState) === json;
+    if (unchangedDuringWrite) {
+      applyMergedYouTubeState(appState, savedState);
+      const mergedSnapshot = JSON.parse(JSON.stringify(appState));
+      if (localService) {
+        await localService.writeCache(saveUid, mergedSnapshot);
+      } else {
+        try {
+          const cacheRevision = Date.now();
+          localStorage.setItem('cache_' + saveUid, JSON.stringify(mergedSnapshot));
+          localStorage.setItem('cache_meta_' + saveUid, String(cacheRevision));
+        } catch(e) {}
+      }
+    }
+
+    _lastSavedJSON = unchangedDuringWrite ? JSON.stringify(appState) : json;
     if (currentUser && currentUser.uid !== saveUid) {
       // This account is no longer active. Its write succeeded, but must not
       // mutate the new account's in-memory dirty flag.
       _clearPendingSync(saveUid);
-    } else if (currentUser && JSON.stringify(appState) !== json) {
+    } else if (!unchangedDuringWrite) {
       // Edits made while this write was in flight are still pending. Never let
       // an older completion clear their durable marker; queue the newest state.
       _localDirty = true;

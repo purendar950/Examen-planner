@@ -2,6 +2,7 @@ import { firebaseConfig } from './shared/firebaseConfig.js';
 import * as dateUtils from './shared/dateUtils.js';
 import * as domUtils from './shared/domUtils.js';
 import { createStorageService } from './shared/storageService.js';
+import * as youtubeSync from './shared/youtubeSync.js';
 import * as youtubeService from './shared/youtubeService.js';
 import * as plannerEngine from './shared/plannerEngine.js';
 
@@ -12,6 +13,7 @@ window.PrepPathModules = Object.freeze({
   dateUtils,
   domUtils,
   createStorageService,
+  youtubeSync,
   youtubeService,
   plannerEngine
 });

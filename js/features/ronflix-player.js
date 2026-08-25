@@ -132,13 +132,9 @@
     try {
       var key = (typeof ytoCurrentPl !== 'undefined' && ytoCurrentPl) ||
         (typeof ytCurrentPlaylistId !== 'undefined' && ytCurrentPlaylistId) || '_single';
-      appState.ytVidTime = appState.ytVidTime || {};
-      appState.ytVidTime[key] = appState.ytVidTime[key] || {};
-      appState.ytVidTime[key][id] = Math.floor(current);
-      if (duration > 0) {
-        appState.ytVidProgress = appState.ytVidProgress || {};
-        appState.ytVidProgress[key] = appState.ytVidProgress[key] || {};
-        appState.ytVidProgress[key][id] = Math.round(current / duration * 100);
+      var percent = duration > 0 ? Math.round(current / duration * 100) : null;
+      if (typeof setYouTubeVideoProgress === 'function') {
+        setYouTubeVideoProgress(key, id, Math.floor(current), percent);
       }
       if (typeof window.saveProgress === 'function') window.saveProgress();
     } catch (e) {}
