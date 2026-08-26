@@ -66,6 +66,9 @@ function isProUser(userData, today) {
   if (trial && trial.expiry && trial.expiry >= today) {
     if (profile.trialSuspended) return false;
     if (!trial.startedAt) return false;                       // no start marker: deny
+    // profile markers are created once by the authenticated trial endpoint;
+    // appState alone is user-writable and therefore never authoritative.
+    if (profile.proTrialUsed !== true || profile.proTrialStartedAt !== trial.startedAt) return false;
     const startedAt = new Date(trial.startedAt);
     if (isNaN(startedAt.getTime())) return false;             // unparseable: deny
     if (startedAt.getTime() > Date.now() + 86400000) return false; // future-dated: deny

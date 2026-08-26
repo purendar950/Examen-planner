@@ -56,10 +56,9 @@ services:
       - key: MAX_TELEGRAM_IMAGE_BYTES
         value: "8388608"
 
-  # Kiro API Key Test — standalone tool that verifies a KIRO_API_KEY works via
-  # kiro-cli headless mode (server.js in kiro-test/). Personal testing tool,
-  # not part of AI Study. Unauthenticated — anyone with the URL can spend Kiro
-  # credits, so keep the URL private (or add a shared-secret check).
+  # Kiro OpenAI-compatible bridge used by the server-side AI provider.
+  # Every diagnostic and completion endpoint requires KIRO_PROXY_TOKEN; the
+  # metered KIRO_API_KEY is never accepted from or returned to callers.
   #
   # CRITICAL: Render's build and runtime run on SEPARATE filesystems. Anything
   # installed OUTSIDE the project directory (e.g. the installer's default
@@ -76,6 +75,12 @@ services:
     buildCommand: "rm -rf vendor && mkdir -p vendor/kiro && env HOME=\"$PWD/vendor/kiro\" bash -c 'curl -fsSL https://cli.kiro.dev/install | bash' && npm install"
     startCommand: "node server.js"
     envVars:
-      # Your Kiro API key (ksk_...). Set manually in the Render dashboard.
+      # Metered upstream credential. Never use this value as the proxy token.
       - key: KIRO_API_KEY
         sync: false
+      # High-entropy bearer token required on diagnostics and completions.
+      # Store this token (not KIRO_API_KEY) as the Kiro provider key in Admin.
+      - key: KIRO_PROXY_TOKEN
+        sync: false
+      - key: NODE_ENV
+        value: production

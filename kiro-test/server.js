@@ -7,38 +7,75 @@
 
 require('dotenv').config();
 const express = require('express');
+const crypto = require('crypto');
 const { execFile } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
 const app = express();
-app.use(express.json({ limit: '5mb' }));
-app.use(express.static(path.join(__dirname, 'public'))); // serves public/index.html
+app.disable('x-powered-by');
+app.use(express.json({ limit: '128kb' }));
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
 
 const PORT = process.env.PORT || 3000;
 const KIRO_API_KEY = process.env.KIRO_API_KEY;
+const KIRO_PROXY_TOKEN = String(process.env.KIRO_PROXY_TOKEN || '');
+const IS_PRODUCTION = process.env.NODE_ENV === 'production' || Boolean(process.env.RENDER);
 
-// Keep-alive: Render free tier spins down after 15min inactivity, causing
-// 30-50s cold starts that exceed the proxy's upstream timeout → 502. This
-// self-ping every 10min keeps the service warm. The /health endpoint is also
-// used by Render's built-in health check.
-app.get('/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
-
-// Self-ping to prevent free-tier sleep (fires 2min after boot, then every 10min)
-const SELF_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
-let _keepAliveTimer = null;
-function startKeepAlive() {
-  if (_keepAliveTimer) return;
-  _keepAliveTimer = setInterval(() => {
-    fetch(`${SELF_URL}/health`).catch(() => {});
-  }, 10 * 60 * 1000); // every 10 minutes
+function proxyAuthorized(req) {
+  if (!KIRO_PROXY_TOKEN) return !IS_PRODUCTION;
+  const header = String(req.headers.authorization || '');
+  if (!header.startsWith('Bearer ')) return false;
+  const supplied = Buffer.from(header.slice(7).trim());
+  const expected = Buffer.from(KIRO_PROXY_TOKEN);
+  return supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
 }
-setTimeout(startKeepAlive, 2 * 60 * 1000); // start 2min after boot
+
+/* Every credit-spending or diagnostic endpoint is fail-closed in production.
+   OpenAI-compatible callers use KIRO_PROXY_TOKEN as their API key; the real
+   KIRO_API_KEY never leaves this process. */
+app.use((req, res, next) => {
+  const canonicalPath = req.path.replace(/\/+$/, '') || '/';
+  const protectedPath = canonicalPath.startsWith('/api/')
+    || canonicalPath === '/v1/chat/completions'
+    || canonicalPath === '/chat/completions';
+  if (!protectedPath) return next();
+  if (!KIRO_PROXY_TOKEN && IS_PRODUCTION) {
+    return res.status(503).json({ error: { message: 'Proxy authentication is not configured', type: 'server_error' } });
+  }
+  if (!proxyAuthorized(req)) {
+    return res.status(401).json({ error: { message: 'Unauthorized', type: 'authentication_error' } });
+  }
+  next();
+});
+
+if (!IS_PRODUCTION) {
+  app.use(express.static(path.join(__dirname, 'public')));
+}
 
 if (!KIRO_API_KEY) {
-  console.warn('WARNING: KIRO_API_KEY is not set. Add it to a .env file (see .env.example).');
+  console.warn('WARNING: KIRO_API_KEY is not set. Add it to the deployment environment.');
 }
+if (IS_PRODUCTION && !KIRO_PROXY_TOKEN) {
+  console.error('KIRO_PROXY_TOKEN is missing; all protected proxy endpoints will return 503.');
+}
+
+app.get('/health', (req, res) => {
+  const ready = Boolean(KIRO_API_KEY) && (!IS_PRODUCTION || Boolean(KIRO_PROXY_TOKEN));
+  res.status(ready ? 200 : 503).json({
+    status: ready ? 'ok' : 'not-ready',
+    proxyAuthConfigured: Boolean(KIRO_PROXY_TOKEN),
+    upstreamKeyConfigured: Boolean(KIRO_API_KEY),
+    uptime: process.uptime()
+  });
+});
 
 // Where the kiro-cli installer places the binary (~/.local/bin). On Render the
 // PATH exported in the start command does not reliably propagate to child
@@ -115,8 +152,11 @@ app.get('/api/diag', (req, res) => {
 });
 
 app.post('/api/test-kiro', (req, res) => {
-  const prompt = (req.body && req.body.prompt) || 'Say hello and confirm you are working.';
-  const model = (req.body && req.body.model) || '';
+  const prompt = String((req.body && req.body.prompt) || 'Say hello and confirm you are working.');
+  const model = String((req.body && req.body.model) || '');
+  if (!prompt.trim() || prompt.length > 20000 || model.length > 100) {
+    return res.status(400).json({ ok: false, error: 'Prompt or model is invalid or too large.' });
+  }
   const bin = resolveKiroCli();
 
   // If a model is specified, set it via `kiro-cli settings chat.defaultModel`
@@ -205,9 +245,15 @@ app.post('/api/test-kiro', (req, res) => {
    ═══════════════════════════════════════════════════════════════════════════ */
 function handleChatCompletions(req, res) {
   const body = req.body || {};
-  const model = body.model || '';
-  const messages = body.messages || [];
+  const model = typeof body.model === 'string' ? body.model : '';
+  const messages = Array.isArray(body.messages) ? body.messages : [];
   const wantStream = body.stream === true;
+  if (model.length > 100 || messages.length > 40 || messages.some(message =>
+    !message || typeof message !== 'object' || typeof message.content !== 'string' || message.content.length > 20000)) {
+    return res.status(400).json({
+      error: { message: 'Model or messages payload is invalid or too large', type: 'invalid_request_error' }
+    });
+  }
 
   // Extract the user's prompt from the messages array (take the last user message)
   let prompt = '';

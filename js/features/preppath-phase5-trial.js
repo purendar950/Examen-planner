@@ -28,6 +28,9 @@ function ezIsProTrialActive() {
   // that startedAt is in the past, so hand-edited trials could pass.
   var trial = appState && appState.proTrial;
   if (!trial || !trial.startedAt) return false;               // no start marker — deny
+  // The one-time marker is written by the authenticated trial endpoint and is
+  // immutable to normal clients. A hand-edited appState trial cannot match it.
+  if (!EZ_PROFILE.proTrialUsed || EZ_PROFILE.proTrialStartedAt !== trial.startedAt) return false;
   var startedAt = new Date(trial.startedAt);
   if (isNaN(startedAt.getTime())) return false;               // unparseable — deny
   if (startedAt.getTime() > Date.now() + 86400000) return false; // future-dated — deny
@@ -52,37 +55,49 @@ function ezProTrialDaysLeft() {
   if (!exp) return 0;
   return Math.max(0, Math.ceil((new Date(exp + 'T23:59:59') - new Date()) / 86400000));
 }
-function ezStartProTrial() {
+async function ezStartProTrial() {
   if (!currentUser) { showToast('Pehle account banao/login karo.', 'error'); return; }
-  // Once per account: don't grant until we authoritatively know this account's
-  // trial history. If the profile/appState hasn't loaded yet (offline, mid-load
-  // or a cleared cache), granting now could RESET a trial the account already
-  // used. EZ_PROFILE is null only during that load window, so wait for it.
   if (typeof ezEntitlementDisplayPending === 'function' ? ezEntitlementDisplayPending() : (typeof EZ_PROFILE === 'undefined' || EZ_PROFILE === null)) {
     showToast('Profile load ho raha hai — ek second baad try karo.', 'info'); return;
   }
-  if (ezProTrialUsed()) { showToast('Free trial pehle hi use ho chuka hai — ek account pe ek hi baar milta hai.', 'error'); return; }
+  var legacyNeedsAdoption = !!(appState && appState.proTrial && appState.proTrial.startedAt
+    && !(EZ_PROFILE && EZ_PROFILE.proTrialUsed));
+  if (ezProTrialUsed() && !legacyNeedsAdoption) { showToast('Free trial pehle hi use ho chuka hai — ek account pe ek hi baar milta hai.', 'error'); return; }
   if (typeof ezIsPro === 'function' && ezIsPro()) { showToast('Aap already Pro ho 🎉', 'info'); return; }
-  var today = new Date();
-  var exp = new Date(today.getTime() + 7 * 86400000);
-  appState.proTrial = { startedAt: today.toISOString(), expiry: exp.toISOString().slice(0, 10), days: 7 };
-  appState.proTrialUsed = true; // durable flag — survives even if proTrial obj is cleared
-  try { saveProgress(); } catch(e) {}
-  // Best-effort: also stamp the profile doc so the "used" marker survives an
-  // appState reset/clear on another device. Silently ignored if Firestore
-  // rules disallow the profile write — the appState flag still enforces it.
+
+  var button = document.getElementById('ez-start-trial-btn');
+  if (button) { button.disabled = true; button.textContent = 'Starting securely…'; }
   try {
-    if (_fbReady && db && currentUser && currentUser.uid) {
-      db.collection('users').doc(currentUser.uid)
-        .update({ 'profile.proTrialUsed': true, 'profile.proTrialStartedAt': appState.proTrial.startedAt })
-        .catch(function() {});
+    var token = await getFirebaseIdToken();
+    var backend = privilegedBackendUrl();
+    var response = await fetch(backend + '/trials/start', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: '{}'
+    });
+    var result = await response.json().catch(function() { return {}; });
+    if (!response.ok || result.ok !== true) {
+      throw new Error(result.error || 'Trial could not be started.');
     }
-  } catch(e) {}
-  showToast('🎉 7-din ka Pro trial shuru! Saare Pro features unlock.', 'success');
-  try { var ov = document.getElementById('ez-upgrade-overlay'); if (ov) ov.classList.remove('open'); } catch(e) {}
-  // FIX 8: Use ezRefreshGates() instead of calling individual lock functions —
-  // it re-applies ALL gates, re-renders the active page, and updates the plan badge.
-  try { if (typeof ezRefreshGates === 'function') ezRefreshGates(); } catch(e) {}
+    if (result.used || !result.trial) {
+      EZ_PROFILE = Object.assign({}, EZ_PROFILE || {}, { proTrialUsed: true });
+      throw new Error('Free trial pehle hi use ho chuka hai — ek account pe ek hi baar milta hai.');
+    }
+
+    appState.proTrial = result.trial;
+    appState.proTrialUsed = true;
+    EZ_PROFILE = Object.assign({}, EZ_PROFILE || {}, {
+      proTrialUsed: true,
+      proTrialStartedAt: result.trial.startedAt
+    });
+    try { saveProgress(); } catch(e) {}
+    showToast('🎉 7-din ka Pro trial shuru! Saare Pro features unlock.', 'success');
+    try { var ov = document.getElementById('ez-upgrade-overlay'); if (ov) ov.classList.remove('open'); } catch(e) {}
+    try { if (typeof ezRefreshGates === 'function') ezRefreshGates(); } catch(e) {}
+  } catch (e) {
+    showToast(e.message || 'Trial start failed.', 'error');
+    if (button) { button.disabled = false; button.textContent = '🎁 Start 7-day free Pro trial'; }
+  }
 }
 
 /* Extend ezIsPro to also honor the self-serve trial (without losing the
@@ -851,14 +866,35 @@ function ezShowDashboardTrialCTA() {
    upgrade modal close animation. */
 (function () {
   var _origStartTrial = ezStartProTrial;
-  ezStartProTrial = function () {
-    _origStartTrial();
+  ezStartProTrial = async function () {
+    await _origStartTrial();
     if (typeof ezIsProTrialActive === 'function' && ezIsProTrialActive()) {
       setTimeout(function() {
         try { ezShowTrialWelcomeModal(); } catch(e) {}
       }, 500);
     }
   };
+})();
+
+/* Adopt a still-active trial created by the previous client-only flow. The
+   backend validates its original bounds and stamps the immutable profile
+   marker without extending the expiry. */
+(function () {
+  var attempts = 0;
+  function adoptLegacyTrial() {
+    attempts += 1;
+    if (!currentUser || typeof EZ_PROFILE === 'undefined' || EZ_PROFILE === null) {
+      if (attempts < 12) setTimeout(adoptLegacyTrial, 1000);
+      return;
+    }
+    var trial = appState && appState.proTrial;
+    var active = trial && trial.startedAt && /^\d{4}-\d{2}-\d{2}$/.test(String(trial.expiry || ''))
+      && new Date(trial.expiry + 'T23:59:59').getTime() >= Date.now();
+    if (active && !EZ_PROFILE.proTrialUsed) {
+      Promise.resolve(ezStartProTrial()).catch(function() {});
+    }
+  }
+  window.addEventListener('load', function() { setTimeout(adoptLegacyTrial, 2500); });
 })();
 
 /* ── 9. TRIAL ANALYTICS (admin-facing) ──

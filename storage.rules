@@ -1,0 +1,15 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Payment proofs are uploaded and read only by the authenticated backend
+    // through the Admin SDK. Browser clients never receive permanent download
+    // tokens; admins request a five-minute signed URL for a specific payment.
+    match /payment_screenshots/{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

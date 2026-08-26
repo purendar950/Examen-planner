@@ -3,11 +3,98 @@
 ══════════════════════════════════════════════ */
 let _saveDebounce = null;
 let _lastSavedJSON = '';
+let _lastSavedUid = '';
+let _syncBaselineState = null;
 let _localDirty = false; // true when there are local edits not yet written to Firestore
+let _legacySyncRecoveryBlocked = window._legacySyncRecoveryBlocked === true;
 const _pendingSyncMemory = new Set();
+
+function setLegacySyncRecoveryBlocked(blocked) {
+  _legacySyncRecoveryBlocked = blocked === true;
+  window._legacySyncRecoveryBlocked = _legacySyncRecoveryBlocked;
+}
+
+function _cloneSyncState(state) {
+  try { return JSON.parse(JSON.stringify(state || {})); }
+  catch(e) { return {}; }
+}
+
+/* Establish the state that was actually loaded for this account. saveProgressNow
+   compares against this snapshot and stamps only changed top-level domains,
+   allowing upgraded clients to merge independent cross-device edits instead
+   of replacing the entire appState blindly. */
+function setSyncBaseline(state, uid) {
+  _syncBaselineState = _cloneSyncState(state);
+  if (uid && _lastSavedUid && _lastSavedUid !== uid) {
+    _lastSavedJSON = '';
+    _lastSavedUid = '';
+  }
+}
+
+function _syncFieldRecord(value) {
+  if (value && typeof value === 'object') {
+    return {
+      updatedAt: Math.max(0, Number(value.updatedAt) || 0),
+      deleted: value.deleted === true,
+      pending: value.pending === true
+    };
+  }
+  return { updatedAt: Math.max(0, Number(value) || 0), deleted: false, pending: false };
+}
+
+function _stampChangedSyncFields(state) {
+  if (!state || typeof state !== 'object') return state;
+  const baseline = _syncBaselineState || {};
+  const priorMeta = state._syncMeta && typeof state._syncMeta === 'object' ? state._syncMeta : {};
+  const baselineMeta = baseline._syncMeta && typeof baseline._syncMeta === 'object' ? baseline._syncMeta : {};
+  const fields = Object.assign({}, priorMeta.fields || {});
+  const baselineFields = baselineMeta.fields || {};
+  const currentKeys = Object.keys(state).filter(key => key !== '_syncMeta');
+  const baselineKeys = Object.keys(baseline).filter(key => key !== '_syncMeta');
+  const metadataKeys = Object.keys(fields).concat(Object.keys(baselineFields));
+  const keys = Array.from(new Set(currentKeys.concat(baselineKeys, metadataKeys)));
+  const hasBaseline = _syncBaselineState !== null;
+
+  keys.forEach(function(key) {
+    const currentHas = Object.prototype.hasOwnProperty.call(state, key);
+    const baselineHas = Object.prototype.hasOwnProperty.call(baseline, key);
+    let changed = false;
+    if (hasBaseline && currentHas !== baselineHas) changed = true;
+    if (hasBaseline && !changed) {
+      try { changed = JSON.stringify(state[key]) !== JSON.stringify(baseline[key]); }
+      catch(e) { changed = state[key] !== baseline[key]; }
+    }
+    const previous = _syncFieldRecord(fields[key]);
+    if (!changed) {
+      if (previous.pending) {
+        /* Keep a domain pending until a successful transaction advances the
+           baseline. This also covers A→B→A while the B write is in flight:
+           the reversion is still a newer local mutation and must be committed. */
+        fields[key] = {
+          updatedAt: previous.updatedAt,
+          deleted: previous.deleted || !currentHas,
+          pending: true
+        };
+      }
+      return;
+    }
+    fields[key] = {
+      updatedAt: previous.updatedAt,
+      deleted: !currentHas,
+      pending: true
+    };
+  });
+
+  state._syncMeta = {
+    version: 2,
+    revision: Math.max(0, Number(priorMeta.revision) || 0),
+    fields: fields
+  };
+  return state;
+}
 function _pendingSyncKey(uid) { return 'pending_sync_' + uid; }
 function _markPendingSync(uid, state) {
-  if (!uid) return;
+  if (!uid || _legacySyncRecoveryBlocked || window._legacySyncRecoveryBlocked === true) return;
   _pendingSyncMemory.add(uid);
   try { localStorage.setItem(_pendingSyncKey(uid), '1'); } catch(e) {}
   const svc = _storageService();
@@ -159,19 +246,25 @@ function setYouTubeLastVideo(video, updatedAt) {
   return true;
 }
 
-function applyMergedYouTubeState(target, source) {
+function applyMergedCloudState(target, source) {
   if (!target || !source) return target;
-  ['ytSync', 'ytWatched', 'ytVidTime', 'ytVidProgress', 'ytLastVideo'].forEach(function(key) {
-    if (typeof source[key] !== 'undefined') target[key] = source[key];
-  });
-  if (source.ytoLibrary && typeof source.ytoLibrary === 'object') {
-    if (!target.ytoLibrary || typeof target.ytoLibrary !== 'object') target.ytoLibrary = {};
-    Object.keys(source.ytoLibrary).forEach(function(courseId) {
-      const remoteCourse = source.ytoLibrary[courseId];
-      if (!target.ytoLibrary[courseId]) target.ytoLibrary[courseId] = remoteCourse;
-      else if (remoteCourse && remoteCourse.watched) target.ytoLibrary[courseId].watched = remoteCourse.watched;
+  const restored = JSON.parse(JSON.stringify(source));
+  if (restored.focusMarks && typeof restored.focusMarks === 'object') {
+    Object.keys(restored.focusMarks).forEach(function(key) {
+      const entry = restored.focusMarks[key];
+      if (!entry || !Array.isArray(entry.strokes)) return;
+      entry.strokes.forEach(function(stroke) {
+        if (!Array.isArray(stroke.points)) return;
+        stroke.points = stroke.points.map(function(point) {
+          return Array.isArray(point) ? point : [point.x, point.y];
+        });
+      });
     });
   }
+  Object.keys(target).forEach(function(key) {
+    if (!Object.prototype.hasOwnProperty.call(restored, key)) delete target[key];
+  });
+  Object.keys(restored).forEach(function(key) { target[key] = restored[key]; });
   return normalizeYouTubeSyncState(target);
 }
 
@@ -208,12 +301,20 @@ function refreshYouTubeSyncUi() {
 
 function saveProgress() {
   if (!currentUser) return;
+  if (_legacySyncRecoveryBlocked || window._legacySyncRecoveryBlocked === true) {
+    setSyncStatus('error', 'Recovery needed — local copy preserved');
+    return;
+  }
 
   /* Refresh the precomputed Telegram digest so the daily sender always reads
      an up-to-date plan. Guarded so it can never block a save. */
   try { if (appState.telegram && appState.telegram.enabled) refreshTelegramDigest(); } catch(e) {}
 
   _localDirty = true;
+  // Stamp the per-domain delta before the first durable write. If the page is
+  // killed during the debounce window, startup can replay the exact pending
+  // domains instead of treating a whole legacy snapshot as authoritative.
+  _stampChangedSyncFields(appState);
   _markPendingSync(currentUser.uid, appState);
   // IndexedDB is the durable cache; localStorage remains a compatibility mirror.
   const svc = _storageService();
@@ -362,7 +463,12 @@ function _firestoreSafeAppState(state) {
 
 async function saveProgressNow() {
   if (!currentUser) return false;
+  if (_legacySyncRecoveryBlocked || window._legacySyncRecoveryBlocked === true) {
+    setSyncStatus('error', 'Recovery needed — local copy preserved');
+    return false;
+  }
   const saveUid = currentUser.uid;
+  _stampChangedSyncFields(appState);
   const json = JSON.stringify(appState);
   const stateToSave = JSON.parse(json);
 
@@ -390,7 +496,7 @@ async function saveProgressNow() {
     setSyncStatus('offline', 'Offline — saved on device');
     return false;
   }
-  if (json === _lastSavedJSON) {
+  if (saveUid === _lastSavedUid && json === _lastSavedJSON) {
     _localDirty = false;
     _clearPendingSync(saveUid);
     setSyncStatus('', '');
@@ -421,33 +527,23 @@ async function saveProgressNow() {
 
   try {
     const svc = _storageService();
-    let savedState = firestorePayload;
+    if (!svc) {
+      // Fail closed when the revision-aware module is unavailable. A direct
+      // whole-document update cannot interpret per-domain metadata and could
+      // replace newer cloud domains with an offline/legacy snapshot.
+      _localDirty = true;
+      _markPendingSync(saveUid, stateToSave);
+      setSyncStatus('offline', 'Saved on device — sync module is loading');
+      return false;
+    }
     // Only the Firestore write needs the sanitized shape — local cache/queue
     // writes above already used stateToSave as-is. The payload was built for
     // the size check above and is reused here to keep both decisions identical.
-    if (svc) {
-      savedState = await svc.saveUserState(saveUid, firestorePayload) || firestorePayload;
-    } else {
-      // Compatibility path if the module failed to load. Normal builds use the
-      // transaction in storageService, which merges per-video sync metadata.
-      const ref = db.collection('users').doc(saveUid);
-      const fallbackState = resolveFallbackYouTubePending(firestorePayload);
-      const payload = {
-        appState: fallbackState,
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      };
-      try {
-        await ref.update(payload);
-      } catch (err) {
-        if (err && err.code === 'not-found') await ref.set(payload, { merge: true });
-        else throw err;
-      }
-      savedState = fallbackState;
-    }
+    const savedState = await svc.saveUserState(saveUid, firestorePayload) || firestorePayload;
 
     const unchangedDuringWrite = currentUser && currentUser.uid === saveUid && JSON.stringify(appState) === json;
     if (unchangedDuringWrite) {
-      applyMergedYouTubeState(appState, savedState);
+      applyMergedCloudState(appState, savedState);
       const mergedSnapshot = JSON.parse(JSON.stringify(appState));
       if (localService) {
         await localService.writeCache(saveUid, mergedSnapshot);
@@ -461,6 +557,8 @@ async function saveProgressNow() {
     }
 
     _lastSavedJSON = unchangedDuringWrite ? JSON.stringify(appState) : json;
+    _lastSavedUid = saveUid;
+    if (unchangedDuringWrite) setSyncBaseline(appState, saveUid);
     if (currentUser && currentUser.uid !== saveUid) {
       // This account is no longer active. Its write succeeded, but must not
       // mutate the new account's in-memory dirty flag.
@@ -504,7 +602,8 @@ setInterval(() => { if (currentUser) saveProgressNow(); }, 30000);
    fires, which could lose the user's last change. We flush on every
    exit-ish event so nothing is lost. */
 function flushSaveOnExit() {
-  if (!currentUser) return;
+  if (!currentUser || _legacySyncRecoveryBlocked || window._legacySyncRecoveryBlocked === true) return;
+  _stampChangedSyncFields(appState);
   /* Always refresh the synchronous compatibility mirror and its revision.
      The matching timestamp lets startup prefer this final page-exit snapshot
      when an asynchronous IndexedDB transaction was terminated mid-commit. */

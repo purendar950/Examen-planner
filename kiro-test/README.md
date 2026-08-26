@@ -1,11 +1,11 @@
-# Kiro API Key Test
+# Authenticated Kiro CLI Bridge
 
-A minimal, standalone service to verify that a `KIRO_API_KEY` works, without ever
-exposing the key to the browser. This is a **personal testing tool**, not part of
-the AI Study feature — see the note at the bottom.
+A small OpenAI-compatible bridge for server-side Kiro CLI requests. The metered
+`KIRO_API_KEY` remains inside the service, and every diagnostic/completion route
+requires a separate high-entropy `KIRO_PROXY_TOKEN` in production.
 
 ```
-Browser (HTML/JS) → this server → kiro-cli (holds the key) → response back to browser
+Authorized server → Bearer KIRO_PROXY_TOKEN → this service → kiro-cli → response
 ```
 
 ## Prerequisites
@@ -20,14 +20,16 @@ Browser (HTML/JS) → this server → kiro-cli (holds the key) → response back
 ```bash
 cd kiro-test
 npm install
-cp .env.example .env      # paste your real key into .env
+cp .env.example .env      # set KIRO_API_KEY and KIRO_PROXY_TOKEN
 npm start
 ```
 
-Open `http://localhost:3000`, or test directly:
+The local UI is available only outside production. Test directly with the proxy
+token (development allows no token only when `KIRO_PROXY_TOKEN` is unset):
 
 ```bash
 curl -X POST http://localhost:3000/api/test-kiro \
+  -H "Authorization: Bearer $KIRO_PROXY_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"prompt":"hello"}'
 ```
@@ -43,9 +45,15 @@ If you set it up manually instead, use these exact values:
 | **Root Directory** | `kiro-test` |
 | **Build Command** | `rm -rf vendor && mkdir -p vendor/kiro && env HOME="$PWD/vendor/kiro" bash -c 'curl -fsSL https://cli.kiro.dev/install \| bash' && npm install` |
 | **Start Command** | `node server.js` |
-| **Env Var** | `KIRO_API_KEY` = your real key (Render dashboard only — never in code) |
+| **Env Var** | `KIRO_API_KEY` = metered upstream key (dashboard only) |
+| **Env Var** | `KIRO_PROXY_TOKEN` = separate random bearer token (dashboard only) |
+| **Env Var** | `NODE_ENV` = `production` |
 
-Render sets `PORT` automatically; `server.js` already reads `process.env.PORT`.
+Set `KIRO_PROXY_TOKEN` **before** deploying this code. Then store that same proxy
+token—not the metered Kiro key—as the Kiro provider key in the Admin provider
+configuration. Deploy, confirm `/health` returns HTTP 200 with both configuration
+flags true, and perform one authenticated completion smoke test. Missing proxy
+auth intentionally makes `/health` and protected routes return 503.
 
 Free tier spins down after 15 min idle (cold start ~30-50s on next request).
 For always-on, use a paid instance type.
@@ -82,17 +90,17 @@ longer needs a `PATH` export.
 
 ## Security notes
 
-- This endpoint is **unauthenticated**. Fine for `localhost` or private testing.
-  If deployed publicly, anyone with the URL can spend your Kiro credits. Add a
-  shared-secret header check before making it public.
-- Never commit `.env`. The repo's root `.gitignore` already excludes `.env`
-  and `.env.*` (except `.env.example`).
+- `/health` is public and reveals only boolean readiness. All `/api/*` and
+  chat-completion routes—including trailing-slash variants—require a
+  constant-time bearer-token match in production.
+- Keep `KIRO_PROXY_TOKEN` distinct from `KIRO_API_KEY`; rotate the proxy token in
+  Render and the Admin provider configuration together.
+- Production does not serve the browser test UI and does not self-ping to avoid
+  platform sleep.
+- Never commit `.env`. The root `.gitignore` excludes `.env` and `.env.*` except
+  `.env.example`.
 
-## Not for AI Study
+## Scope
 
-Kiro's headless mode (`kiro-cli` + `KIRO_API_KEY`) is designed for running the
-Kiro agent against your own repo (code review, docs, audits) — not as a hosted
-inference API for serving end users. This tool exists only to verify a key
-works; it is intentionally kept separate from the `AI Study` feature's
-`STUDY_PROVIDERS` (Bynara, Gemini, Groq, etc.), which are real hosted
-chat-completions APIs meant for that purpose.
+This bridge is intentionally tool-free (`--trust-tools=`) and should be called
+only by trusted server-side provider code. It is not a public browser API.

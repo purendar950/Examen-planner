@@ -2,14 +2,15 @@
    AUTH FUNCTIONS — FIREBASE
 ══════════════════════════════════════════════ */
 
-/* ── PASSWORD HASHING (localStorage fallback only) ──
-   Uses SHA-256 via Web Crypto API — irreversible, unlike btoa().
-   Legacy btoa() passwords are auto-migrated on first successful login. */
-async function _hashPassword(password) {
-  const encoded = new TextEncoder().encode(password);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+/* Credentials are handled exclusively by Firebase Authentication. Offline
+   support restores an already-authenticated Firebase session and cached study
+   data; it must never create or validate a second local password database. */
+function _firebaseAuthUnavailable(type, button, idleLabel) {
+  showAuthError(type, 'Authentication service unavailable. Check your connection and reopen the app.');
+  if (button) {
+    button.disabled = false;
+    button.textContent = idleLabel;
+  }
 }
 
 function switchAuthTab(tab) {
@@ -45,27 +46,8 @@ async function handleLogin() {
   btn.disabled = true; btn.textContent = 'Signing in...';
   document.getElementById('login-error').style.display = 'none';
 
-  if (!_fbReady) {
-    // localStorage fallback
-    const users = JSON.parse(localStorage.getItem('ssc_users') || '{}');
-    if (!users[email]) {
-      showAuthError('login', 'Invalid email or password.');
-      btn.disabled = false; btn.textContent = 'Sign In →';
-      return;
-    }
-    const stored = users[email].password;
-    const hashed = await _hashPassword(pass);
-    if (stored !== hashed && stored !== btoa(pass)) {
-      showAuthError('login', 'Invalid email or password.');
-      btn.disabled = false; btn.textContent = 'Sign In →';
-      return;
-    }
-    // Auto-migrate legacy btoa() password to SHA-256 on successful login
-    if (stored === btoa(pass) && stored !== hashed) {
-      users[email].password = hashed;
-      localStorage.setItem('ssc_users', JSON.stringify(users));
-    }
-    loginUser(email, users[email].name, users[email].uid || email, users[email].state || {});
+  if (!_fbReady || !auth) {
+    _firebaseAuthUnavailable('login', btn, 'Sign In →');
     return;
   }
 
@@ -120,16 +102,8 @@ async function handleRegister() {
   btn.disabled = true; btn.textContent = 'Creating account...';
   document.getElementById('reg-error').style.display = 'none';
 
-  if (!_fbReady) {
-    // localStorage fallback
-    const users = JSON.parse(localStorage.getItem('ssc_users') || '{}');
-    if (users[email]) { showAuthError('reg', 'Email already registered.'); btn.disabled=false; btn.textContent='Create Account →'; return; }
-    const hashed = await _hashPassword(pass);
-    users[email] = { name, password: hashed, uid: email, state: getDefaultState() };
-    localStorage.setItem('ssc_users', JSON.stringify(users));
-    btn.disabled = false; btn.textContent = 'Create Account →';
-    _afterRegisterRedirect(email);
-    _ezShowRegBanner(regStatus);
+  if (!_fbReady || !auth || !db) {
+    _firebaseAuthUnavailable('reg', btn, 'Create Account →');
     return;
   }
 
@@ -314,6 +288,7 @@ function loginUser(email, name, uid, state) {
   if (!appState.ytVidTime) appState.ytVidTime = {};
   if (!appState.ytVidProgress) appState.ytVidProgress = {};
   try { if (typeof normalizeYouTubeSyncState === 'function') normalizeYouTubeSyncState(appState); } catch(e) {}
+  try { if (typeof setSyncBaseline === 'function') setSyncBaseline(appState, uid); } catch(e) {}
 
   document.getElementById('auth-screen').style.display   = 'none';
   document.getElementById('app').style.display           = 'block';
@@ -360,7 +335,7 @@ async function handleLogout() {
      credentials. If the network is slow/offline, the durable pending marker
      replays this exact UID cache on the next login instead of hanging logout
      or allowing an older cloud snapshot to overwrite the last edit. */
-  if (currentUser && currentUser.uid) {
+  if (currentUser && currentUser.uid && window._legacySyncRecoveryBlocked !== true) {
     const logoutUid = currentUser.uid;
     try { clearTimeout(_saveDebounce); } catch (e) {}
     try {
@@ -784,6 +759,17 @@ if (auth && !_isBadProtocol) {
     let appStarted = false;
     let liveServerSnapshotSeen = false;
     let suppressInitialRemoteState = false;
+    let cachedQueuedRecord = null;
+    let cachedStorageService = null;
+    const setLegacyRecoveryBlocked = function(blocked) {
+      window._legacySyncRecoveryBlocked = blocked === true;
+      try {
+        if (typeof setLegacySyncRecoveryBlocked === 'function') {
+          setLegacySyncRecoveryBlocked(blocked === true);
+        }
+      } catch(e) {}
+    };
+    setLegacyRecoveryBlocked(false);
     const isCurrentAuthEvent = function() {
       return authGeneration === _authSessionGeneration && auth.currentUser && auth.currentUser.uid === user.uid;
     };
@@ -802,17 +788,36 @@ if (auth && !_isBadProtocol) {
         const mods = await waitForStorageModule();
         if (mods && typeof mods.createStorageService === 'function') {
           const svc = mods.createStorageService({ db, auth });
+          cachedStorageService = svc;
           // A queued snapshot is the newest local truth after an offline close.
-          // Prefer it over both the regular cache and an older cloud snapshot.
-          const queued = await svc.getQueuedState(user.uid, null);
-          if (queued) return queued;
+          // Preserve its record metadata so legacy queues can be quarantined
+          // instead of being replayed as an all-domain overwrite.
+          if (typeof svc.getQueuedStateRecord === 'function') {
+            cachedQueuedRecord = await svc.getQueuedStateRecord(user.uid);
+            if (cachedQueuedRecord && cachedQueuedRecord.state) return cachedQueuedRecord.state;
+          } else {
+            const queued = await svc.getQueuedState(user.uid, null);
+            if (queued) return queued;
+          }
           return await svc.readCache(user.uid, null);
         }
         const cached = localStorage.getItem('cache_' + user.uid);
-        return cached ? JSON.parse(cached) : null;
+        if (!cached) return null;
+        const state = JSON.parse(cached);
+        if (localStorage.getItem('pending_sync_' + user.uid) === '1') {
+          cachedQueuedRecord = {
+            state: state,
+            updatedAt: Number(localStorage.getItem('cache_meta_' + user.uid)) || 0,
+            pending: true
+          };
+        }
+        return state;
       } catch(e) { return null; }
     };
     const writeCachedState = async function(state) {
+      // If the only unversioned offline copy could not be duplicated, never
+      // replace its original cache key until recovery is resolved.
+      if (window._legacySyncRecoveryBlocked === true) return false;
       try {
         const mods = await waitForStorageModule();
         if (mods && typeof mods.createStorageService === 'function') {
@@ -831,7 +836,7 @@ if (auth && !_isBadProtocol) {
         document.addEventListener('DOMContentLoaded', resolve, { once: true });
       });
     };
-    const startApp = async function(state) {
+    const startApp = async function(state, replayPending = true) {
       if (appStarted || !isCurrentAuthEvent()) return false;
       // auth.js is loaded before several functions used by initApp(). On a hot
       // Firebase/cache restore the auth callback can win that race, so wait
@@ -843,7 +848,7 @@ if (auth && !_isBadProtocol) {
       // A previous sign-out/offline close may have preserved newer local data
       // that Firestore did not acknowledge. Replay it before accepting remote
       // appState so an older cloud document cannot overwrite the UID cache.
-      if (typeof hasPendingSync === 'function' && await hasPendingSync(user.uid)) {
+      if (replayPending && typeof hasPendingSync === 'function' && await hasPendingSync(user.uid)) {
         if (typeof _localDirty !== 'undefined') _localDirty = true;
         const replayPromise = Promise.resolve().then(function() { return saveProgressNow(); });
         const replaySettled = await Promise.race([
@@ -889,6 +894,7 @@ if (auth && !_isBadProtocol) {
       void writeCachedState(hydrated);
       if (JSON.stringify(appState) === JSON.stringify(hydrated)) return;
       appState = hydrated;
+      try { if (typeof setSyncBaseline === 'function') setSyncBaseline(appState, user.uid); } catch(e) {}
       try { if (typeof notesFocusRefreshPrivateMarks === 'function') notesFocusRefreshPrivateMarks(); } catch(e) {}
       if (appState.ytOrganiser && appState.ytOrganiser.videos) ytoState = appState.ytOrganiser;
       try { if (typeof ytoRenderMainSidebar === 'function') ytoRenderMainSidebar(); } catch(e) {}
@@ -932,15 +938,102 @@ if (auth && !_isBadProtocol) {
       try { if (typeof ezRefreshGates === 'function') ezRefreshGates(); } catch(e) {}
     };
 
-    const cachedState = await readCachedState();
+    let cachedState = await readCachedState();
+    let preloadedDocResult = null;
+    let replayCachedState = true;
+    const queuedFields = cachedState && cachedState._syncMeta
+      && cachedState._syncMeta.fields && typeof cachedState._syncMeta.fields === 'object'
+      ? cachedState._syncMeta.fields : null;
+    const legacyQueuedState = !!(cachedQueuedRecord && cachedState
+      && (!queuedFields || Object.keys(queuedFields).length === 0));
+
+    /* Old builds queued a whole app snapshot with no per-domain delta. Such a
+       snapshot cannot be merged safely: local-wins can overwrite newer cloud
+       work, while remote-wins can discard offline work. Preserve a recovery
+       copy, fetch the cloud document first, and only replay the legacy snapshot
+       when the account has no cloud state. All queues written by this build are
+       stamped before persistence and do not take this migration path. */
+    if (legacyQueuedState) {
+      let recoveryPreserved = false;
+      if (cachedStorageService && typeof cachedStorageService.preserveLegacyRecovery === 'function') {
+        recoveryPreserved = cachedStorageService.preserveLegacyRecovery(
+          user.uid, cachedState, cachedQueuedRecord.updatedAt
+        );
+      } else {
+        try {
+          localStorage.setItem('sync_recovery_' + user.uid, JSON.stringify({
+            reason: 'legacy-unversioned-queue',
+            preservedAt: Date.now(),
+            updatedAt: Number(cachedQueuedRecord.updatedAt) || 0,
+            state: cachedState
+          }));
+          recoveryPreserved = true;
+        } catch(e) {}
+      }
+      try {
+        const snap = await db.collection('users').doc(user.uid).get();
+        preloadedDocResult = { snap: snap };
+        if (snap.exists && snap.data() && snap.data().appState) {
+          const remoteState = snap.data().appState;
+          const differsFromCloud = JSON.stringify(cachedState) !== JSON.stringify(remoteState);
+          // A cloud document exists, so an unversioned whole-state queue must
+          // never enter the normal replay path, even when durable queue cleanup
+          // fails. The preserved recovery copy remains available for manual
+          // reconciliation without risking unseen cloud domains.
+          replayCachedState = false;
+          if (recoveryPreserved && cachedStorageService) {
+            await cachedStorageService.clearPendingSync(user.uid);
+          }
+          if (differsFromCloud) {
+            setLegacyRecoveryBlocked(!recoveryPreserved);
+            cachedState = { ...getDefaultState(), ...remoteState };
+            // Never replace the only legacy offline copy when duplicating it
+            // failed (for example because localStorage quota is exhausted).
+            if (recoveryPreserved) await writeCachedState(cachedState);
+            try {
+              if (typeof showToast === 'function') {
+                showToast(recoveryPreserved
+                  ? 'A legacy offline copy was preserved; newer cloud progress was loaded.'
+                  : 'Offline recovery needs attention. The original local copy was preserved and saving is paused.', 'info');
+              }
+            } catch(e) {}
+          } else {
+            setLegacyRecoveryBlocked(false);
+            cachedState = remoteState;
+          }
+        } else {
+          // No competing cloud state exists. Convert every legacy domain into
+          // an explicit pending delta so the first upload is deterministic.
+          setLegacyRecoveryBlocked(false);
+          const fields = {};
+          Object.keys(cachedState).filter(function(key) { return key !== '_syncMeta'; })
+            .forEach(function(key) {
+              fields[key] = { updatedAt: 0, deleted: false, pending: true };
+            });
+          cachedState._syncMeta = { version: 2, revision: 0, fields: fields };
+        }
+      } catch(error) {
+        preloadedDocResult = { error: error };
+        // Fail closed: without a cloud snapshot there is no safe way to merge
+        // an unversioned whole-state queue. Never replay it automatically.
+        replayCachedState = false;
+        setLegacyRecoveryBlocked(!recoveryPreserved);
+        if (recoveryPreserved && cachedStorageService) {
+          await cachedStorageService.clearPendingSync(user.uid);
+        }
+      }
+    }
+
     if (cachedState) {
       // Repeat login/session restore: show the dashboard immediately from the
       // matching user's cache. Firestore refresh continues in the background.
-      await startApp({ ...getDefaultState(), ...cachedState });
+      await startApp({ ...getDefaultState(), ...cachedState }, replayCachedState);
     }
 
-    const docResultPromise = db.collection('users').doc(user.uid).get()
-      .then(function(snap) { return { snap: snap }; }, function(error) { return { error: error }; });
+    const docResultPromise = preloadedDocResult
+      ? Promise.resolve(preloadedDocResult)
+      : db.collection('users').doc(user.uid).get()
+        .then(function(snap) { return { snap: snap }; }, function(error) { return { error: error }; });
 
     if (appStarted) {
       // Do not put the loading overlay back while refreshing cached data.
@@ -1051,6 +1144,7 @@ if (auth && !_isBadProtocol) {
         const remoteJSON = JSON.stringify(mergedRemote);
         if (localJSON !== remoteJSON) {
           appState = mergedRemote;
+          try { if (typeof setSyncBaseline === 'function') setSyncBaseline(appState, user.uid); } catch(e) {}
           try { if (typeof notesFocusRefreshPrivateMarks === 'function') notesFocusRefreshPrivateMarks(); } catch(e) {}
           if (typeof isValidPage === 'function' && isValidPage(_keepActivePage)) {
             appState.activePage = _keepActivePage;

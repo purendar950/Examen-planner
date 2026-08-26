@@ -8,6 +8,91 @@ import {
 } from './offlineStore.js';
 import { mergeYouTubeSyncState } from './youtubeSync.js';
 
+function syncFieldRecord(value) {
+  if (value && typeof value === 'object') {
+    return {
+      updatedAt: Math.max(0, Number(value.updatedAt) || 0),
+      deleted: value.deleted === true,
+      pending: value.pending === true
+    };
+  }
+  return { updatedAt: Math.max(0, Number(value) || 0), deleted: false, pending: false };
+}
+
+/* Merge appState domains by the revision metadata stamped at save time. This
+   keeps the persisted shape backward-compatible while preventing an edit to,
+   for example, habits on one upgraded device from replacing newer tasks on
+   another. Keys without metadata retain the legacy local-wins behavior. */
+export function mergeAppStateByRevision(localState, remoteState) {
+  const local = localState && typeof localState === 'object' ? localState : {};
+  const remote = remoteState && typeof remoteState === 'object' ? remoteState : {};
+  const localMeta = local._syncMeta && typeof local._syncMeta === 'object' ? local._syncMeta : {};
+  const remoteMeta = remote._syncMeta && typeof remote._syncMeta === 'object' ? remote._syncMeta : {};
+  const localFields = localMeta.fields || {};
+  const remoteFields = remoteMeta.fields || {};
+  const localIsVersioned = Number(localMeta.version) >= 2;
+  const keys = new Set([...Object.keys(remote), ...Object.keys(local)]);
+  keys.delete('_syncMeta');
+  const merged = {};
+  const mergedFields = {};
+  const revisions = [Number(remoteMeta.revision) || 0, Number(localMeta.revision) || 0];
+  Object.values(remoteFields).forEach(value => revisions.push(syncFieldRecord(value).updatedAt));
+  Object.values(localFields).forEach(value => {
+    const record = syncFieldRecord(value);
+    if (!record.pending) revisions.push(record.updatedAt);
+  });
+  const baseRevision = Math.max(0, ...revisions);
+  const hasPendingLocal = Object.values(localFields).some(value => syncFieldRecord(value).pending);
+  const commitRevision = hasPendingLocal ? baseRevision + 1 : baseRevision;
+
+  keys.forEach((key) => {
+    const localHasMeta = Object.prototype.hasOwnProperty.call(localFields, key);
+    const remoteHasMeta = Object.prototype.hasOwnProperty.call(remoteFields, key);
+    const localRevision = syncFieldRecord(localFields[key]);
+    const remoteRevision = syncFieldRecord(remoteFields[key]);
+    const localHasValue = Object.prototype.hasOwnProperty.call(local, key);
+    const remoteHasValue = Object.prototype.hasOwnProperty.call(remote, key);
+    let useLocal;
+
+    // A pending marker means this domain changed relative to the exact state
+    // loaded by this device. The transaction assigns it a logical revision,
+    // so browser clock skew can never make an old value permanently dominant.
+    if (localRevision.pending) {
+      useLocal = true;
+    } else if (localHasMeta || remoteHasMeta) {
+      if (localRevision.updatedAt !== remoteRevision.updatedAt) {
+        useLocal = localRevision.updatedAt > remoteRevision.updatedAt;
+      } else {
+        useLocal = localHasMeta || !remoteHasMeta;
+      }
+    } else {
+      /* Once a client has revision metadata, missing field metadata means the
+         domain was unchanged relative to its loaded baseline—not that the
+         whole local snapshot is newer. Preserve an existing remote domain;
+         keep local only when the cloud has no value. This makes quarantined
+         legacy recovery/reconnect fail closed instead of whole-state local-wins. */
+      useLocal = localIsVersioned ? !remoteHasValue : (localHasValue || !remoteHasValue);
+    }
+
+    const winner = useLocal ? localRevision : remoteRevision;
+    const winnerHasValue = useLocal ? localHasValue : remoteHasValue;
+    const winnerState = useLocal ? local : remote;
+    if (winnerHasValue && !winner.deleted) merged[key] = winnerState[key];
+    if (localHasMeta || remoteHasMeta) {
+      mergedFields[key] = {
+        updatedAt: localRevision.pending && useLocal ? commitRevision : winner.updatedAt,
+        deleted: winner.deleted || !winnerHasValue,
+        pending: false
+      };
+    }
+  });
+
+  if (Object.keys(mergedFields).length) {
+    merged._syncMeta = { version: 2, revision: commitRevision, fields: mergedFields };
+  }
+  return merged;
+}
+
 export function createStorageService({ db, auth, localStorageRef = window.localStorage } = {}) {
   function cacheKey(uid) {
     return `cache_${uid}`;
@@ -66,7 +151,7 @@ export function createStorageService({ db, auth, localStorageRef = window.localS
   }
 
   async function writeCache(uid, state) {
-    if (!uid) return false;
+    if (!uid || window._legacySyncRecoveryBlocked === true) return false;
     const updatedAt = Date.now();
     let mirrorWritten = false;
 
@@ -91,7 +176,7 @@ export function createStorageService({ db, auth, localStorageRef = window.localS
   }
 
   async function queueSync(uid, state) {
-    if (!uid) return false;
+    if (!uid || window._legacySyncRecoveryBlocked === true) return false;
     const updatedAt = Date.now();
     try { localStorageRef.setItem(pendingKey(uid), '1'); } catch (error) {}
     try {
@@ -102,8 +187,8 @@ export function createStorageService({ db, auth, localStorageRef = window.localS
     }
   }
 
-  async function getQueuedState(uid, fallback = null) {
-    if (!uid) return fallback;
+  async function getQueuedStateRecord(uid) {
+    if (!uid) return null;
     const legacy = readLegacyRecord(uid);
     let queued = null;
     try {
@@ -114,8 +199,28 @@ export function createStorageService({ db, auth, localStorageRef = window.localS
 
     // If a synchronous exit write is newer than the async queue commit, replay
     // that mirror instead. This closes the mobile-tab-kill window.
-    const newest = newerLocalRecord(legacy?.pending ? legacy : null, queued);
+    return newerLocalRecord(legacy?.pending ? legacy : null, queued);
+  }
+
+  async function getQueuedState(uid, fallback = null) {
+    const newest = await getQueuedStateRecord(uid);
     return newest?.state ?? fallback;
+  }
+
+  function preserveLegacyRecovery(uid, state, updatedAt = Date.now()) {
+    if (!uid || !state) return false;
+    try {
+      localStorageRef.setItem(`sync_recovery_${uid}`, JSON.stringify({
+        reason: 'legacy-unversioned-queue',
+        preservedAt: Date.now(),
+        updatedAt: Number(updatedAt) || 0,
+        state
+      }));
+      return true;
+    } catch (error) {
+      console.warn('[storageService] legacy recovery snapshot could not be preserved', error);
+      return false;
+    }
   }
 
   async function hasPendingSync(uid) {
@@ -154,10 +259,9 @@ export function createStorageService({ db, auth, localStorageRef = window.localS
       return db.runTransaction(async (transaction) => {
         const snap = await transaction.get(ref);
         const remoteState = snap.exists ? (snap.data().appState || {}) : {};
-        // Preserve fields introduced by another device/build that this local
-        // state does not know about, while retaining existing local ownership
-        // for known top-level fields. Per-video operations are rebased below.
-        const candidateState = { ...remoteState, ...appState };
+        // Rebase independently changed top-level domains by their revisions,
+        // then apply the finer per-video timestamp/tombstone merge.
+        const candidateState = mergeAppStateByRevision(appState, remoteState);
         const mergedState = mergeYouTubeSyncState(candidateState, remoteState, { resolveLocalPending: true });
         const payload = { appState: mergedState, updatedAt: serverTimestamp() };
         if (snap.exists) transaction.update(ref, payload);
@@ -194,6 +298,8 @@ export function createStorageService({ db, auth, localStorageRef = window.localS
     writeCache,
     queueSync,
     getQueuedState,
+    getQueuedStateRecord,
+    preserveLegacyRecovery,
     hasPendingSync,
     clearPendingSync,
     saveUserState,

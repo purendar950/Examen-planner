@@ -25,39 +25,20 @@ handleRegister = async function() {
   const fp = ezFingerprint();
   const ip = await ezGetIp();
 
-  /* ── localStorage-only fallback (no Firebase) ── */
-  if (!_fbReady) {
-    const users = JSON.parse(localStorage.getItem('ssc_users') || '{}');
-    if (users[email]) { showAuthError('reg', 'Email already registered.'); btn.disabled = false; btn.textContent = 'Create Account →'; return; }
-    const deviceUsed = Object.values(users).some(u => u.profile && u.profile.fp === fp);
-    // FIX: approve regardless of device; deviceDuplicate is only an admin flag.
-    const regStatus  = 'approved';
-    users[email] = { name, password: btoa(pass), uid: email, state: getDefaultState(),
-      profile: { name, email, mobile, examTarget: examT, status: regStatus, plan: 'free', fp, ip, deviceDuplicate: deviceUsed } };
-    localStorage.setItem('ssc_users', JSON.stringify(users));
-    btn.disabled = false; btn.textContent = 'Create Account →';
-    _afterRegisterRedirect(email);
-    _ezShowRegBanner(regStatus);
+  /* Fail closed when Firebase is unavailable. Cached study data remains
+     available to an already-restored session, but passwords are never stored
+     or checked in localStorage. */
+  if (!_fbReady || !auth || !db) {
+    _firebaseAuthUnavailable('reg', btn, 'Create Account →');
     return;
   }
 
   /* ── Firebase path ── */
   try {
-    /* Step 1: Note whether this device fingerprint already has an account.
-       FIX: this is now only an ADMIN-REVIEW FLAG, not a login block. Multiple
-       real users may legitimately share one device (guest mode was removed),
-       so a duplicate device no longer forces 'pending' status — which was
-       causing the second user to be logged out by the approval gate. */
-    let deviceAlreadyUsed = false;
-    try {
-      const fpSnap = await db.collection('users')
-        .where('profile.fp', '==', fp)
-        .limit(1)
-        .get();
-      deviceAlreadyUsed = !fpSnap.empty;
-    } catch(e) {
-      deviceAlreadyUsed = false; // index not ready yet — default safe
-    }
+    /* Duplicate-device detection cannot safely query every user's private
+       profile from the browser. Referral abuse checks run in the authenticated
+       backend; registration itself stays available to shared-family devices. */
+    const deviceAlreadyUsed = false;
 
     // Always approve on registration; deviceDuplicate stays as a flag the
     // admin can review/suspend manually if abuse is suspected.
@@ -122,10 +103,9 @@ async function ezCheckApproval(uid, email) {
       reason = p.rejectReason || '';
     } catch(e) { return; }
   } else {
-    try {
-      const users = JSON.parse(localStorage.getItem('ssc_users') || '{}');
-      status = (users[email] && users[email].profile && users[email].profile.status) || 'approved';
-    } catch(e) { return; }
+    // No local credential/account fallback: approval is authoritative only
+    // when it comes from the signed-in user's Firestore profile.
+    return;
   }
   const old = document.getElementById('ez-gate');
   if (status === 'approved') { if (old) old.remove(); return; }

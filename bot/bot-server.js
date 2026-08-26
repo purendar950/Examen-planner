@@ -137,6 +137,7 @@ function parseServiceAccount(rawValue) {
 }
 
 let db = null;
+let storageBucket = null;
 /* Surfaced by GET /health so a deployment can be checked without log access. */
 const FIRESTORE_STATUS = { code: 'init' };
 
@@ -165,6 +166,7 @@ function initFirestore() {
     const admin = require('firebase-admin');
     admin.initializeApp({ credential: admin.credential.cert(loaded.serviceAccount) });
     db = admin.firestore();
+    storageBucket = admin.storage().bucket(`${loaded.serviceAccount.project_id}.firebasestorage.app`);
     global._fbAdmin = admin; // for FieldValue / Timestamp
     FIRESTORE_STATUS.code = 'ready';
     console.log(`✅ Firebase Admin ready (project: ${loaded.serviceAccount.project_id}) — Firestore features enabled`);
@@ -1604,6 +1606,452 @@ async function proRelayUser(uid) {
     throw Object.assign(new Error('This screenshot feature requires an active Pro plan or trial'), { status: 403 });
   }
   return data;
+}
+
+async function joinStudyCircle(actor, body) {
+  const uid = actor.uid;
+  const code = String(body && body.code || '').trim().toUpperCase();
+  const requestedCircleId = String(body && body.circleId || '').trim();
+  if (!!code === !!requestedCircleId) {
+    throw Object.assign(new Error('provide either an invite code or a public circle ID'), { status: 400 });
+  }
+  if (code && !/^[A-HJ-NP-Z2-9]{6}$/.test(code)) {
+    throw Object.assign(new Error('valid 6-character invite code required'), { status: 400 });
+  }
+  if (requestedCircleId && !/^[A-Za-z0-9_-]{6,128}$/.test(requestedCircleId)) {
+    throw Object.assign(new Error('valid circle ID required'), { status: 400 });
+  }
+
+  let circleRef;
+  if (code) {
+    const codeSnap = await db.collection('studyCircles').where('joinCode', '==', code).limit(2).get();
+    if (codeSnap.empty) throw Object.assign(new Error('circle invite code was not found'), { status: 404 });
+    if (codeSnap.size !== 1) {
+      throw Object.assign(new Error('circle invite code is ambiguous; ask the owner for a new code'), { status: 409 });
+    }
+    circleRef = codeSnap.docs[0].ref;
+  } else {
+    circleRef = db.collection('studyCircles').doc(requestedCircleId);
+  }
+
+  return db.runTransaction(async transaction => {
+    const circleSnap = await transaction.get(circleRef);
+    if (!circleSnap.exists) throw Object.assign(new Error('circle was not found'), { status: 404 });
+    const circle = circleSnap.data() || {};
+    if (code) {
+      if (circle.visibility !== 'private' || String(circle.joinCode || '').toUpperCase() !== code) {
+        throw Object.assign(new Error('invite code is no longer valid'), { status: 409 });
+      }
+    } else if (circle.visibility !== 'public' || circle.approvalRequired === true) {
+      throw Object.assign(new Error('this circle requires an invite or owner approval'), { status: 403 });
+    }
+
+    const memberRef = circleRef.collection('members').doc(uid);
+    const memberSnap = await transaction.get(memberRef);
+    if (memberSnap.exists) return { circleId: circleRef.id, alreadyMember: true };
+    const memberCount = Math.max(0, Number(circle.memberCount) || 0);
+    const maxMembers = circle.maxMembers == null ? null : Math.max(0, Number(circle.maxMembers) || 0);
+    if (maxMembers !== null && memberCount >= maxMembers) {
+      throw Object.assign(new Error('circle is full'), { status: 409 });
+    }
+
+    const now = global._fbAdmin.firestore.FieldValue.serverTimestamp();
+    transaction.create(memberRef, {
+      uid,
+      name: String(actor.name || actor.email || 'Learner').slice(0, 100),
+      avatar: String(actor.picture || '').slice(0, 2048),
+      role: 'member',
+      joinedAt: now,
+      isPremium: false,
+      isFocusing: false,
+      weeklyFocusMinutes: 0,
+      weekKey: ''
+    });
+    transaction.set(circleRef.collection('joinRequests').doc(uid), {
+      uid,
+      status: 'approved',
+      respondedAt: now
+    }, { merge: true });
+    transaction.update(circleRef, {
+      memberCount: global._fbAdmin.firestore.FieldValue.increment(1)
+    });
+    return { circleId: circleRef.id, alreadyMember: false };
+  });
+}
+
+async function updateStudyCircleVisibility(actor, body) {
+  const circleId = String(body && body.circleId || '').trim();
+  const visibility = String(body && body.visibility || '').trim();
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(circleId) || !['public', 'private'].includes(visibility)) {
+    throw Object.assign(new Error('valid circle and visibility are required'), { status: 400 });
+  }
+
+  let freshCode = '';
+  if (visibility === 'private') {
+    const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      let candidate = '';
+      for (let index = 0; index < 6; index += 1) {
+        candidate += alphabet[crypto.randomInt(0, alphabet.length)];
+      }
+      const collision = await db.collection('studyCircles').where('joinCode', '==', candidate).limit(1).get();
+      if (collision.empty) { freshCode = candidate; break; }
+    }
+    if (!freshCode) throw Object.assign(new Error('could not allocate a private invite code'), { status: 503 });
+  }
+
+  const circleRef = db.collection('studyCircles').doc(circleId);
+  await db.runTransaction(async transaction => {
+    const snap = await transaction.get(circleRef);
+    if (!snap.exists) throw Object.assign(new Error('circle was not found'), { status: 404 });
+    const circle = snap.data() || {};
+    if (circle.ownerId !== actor.uid) throw Object.assign(new Error('only the circle owner can change visibility'), { status: 403 });
+    transaction.update(circleRef, {
+      visibility,
+      joinCode: visibility === 'private' ? freshCode : '',
+      approvalRequired: visibility === 'public' ? !!circle.approvalRequired : false
+    });
+  });
+  return { circleId, visibility, joinCode: freshCode };
+}
+
+function referralBonusDays(friendCount) {
+  return friendCount > 0 ? 3 : 0;
+}
+
+function referralExpiryFrom(profile, bonusDays) {
+  const today = new Date(`${todayIST()}T00:00:00.000Z`);
+  const existing = profile && /^\d{4}-\d{2}-\d{2}$/.test(String(profile.planExpiry || ''))
+    ? new Date(`${profile.planExpiry}T00:00:00.000Z`)
+    : today;
+  const base = existing > today ? existing : today;
+  base.setUTCDate(base.getUTCDate() + bonusDays);
+  return base.toISOString().slice(0, 10);
+}
+
+/* Referral rewards are privileged entitlement writes. The verified Firebase
+   account determines the referee. Eligibility uses one claim per verified,
+   newly-created account and a fixed lifetime referrer cap; browser/device
+   identifiers are intentionally not trusted as an anti-abuse boundary. */
+async function claimReferralReward(refereeUid, rawReferrerUid) {
+  const referrerUid = String(rawReferrerUid || '').trim();
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(referrerUid)) {
+    throw Object.assign(new Error('valid referral identifier is required'), { status: 400 });
+  }
+  if (referrerUid === refereeUid) {
+    return { rejected: true, reason: 'Self-referrals are not eligible.' };
+  }
+
+  const authUser = await global._fbAdmin.auth().getUser(refereeUid);
+  const createdMs = Date.parse(authUser.metadata && authUser.metadata.creationTime || '');
+  if (!authUser.emailVerified) {
+    return { rejected: true, reason: 'Verify your email before claiming a referral reward.' };
+  }
+  if (!Number.isFinite(createdMs) || Date.now() - createdMs > 24 * 60 * 60 * 1000) {
+    return { rejected: true, reason: 'Referral rewards are available only during the first 24 hours of a new account.' };
+  }
+
+  const accountRef = db.collection('referral_accounts').doc(refereeUid);
+  const referrerRef = db.collection('users').doc(referrerUid);
+  const refereeRef = db.collection('users').doc(refereeUid);
+  const logRef = db.collection('referral_log').doc(refereeUid);
+  const nowIso = new Date().toISOString();
+  const maxLifetimeRewards = 10;
+
+  return db.runTransaction(async transaction => {
+    const [accountSnap, referrerSnap, refereeSnap] = await Promise.all([
+      transaction.get(accountRef), transaction.get(referrerRef), transaction.get(refereeRef)
+    ]);
+    if (accountSnap.exists) return { duplicate: true };
+    if (!referrerSnap.exists || !refereeSnap.exists) {
+      return { rejected: true, reason: 'Referral account could not be verified.' };
+    }
+
+    const referrerProfile = (referrerSnap.data() || {}).profile || {};
+    const refereeProfile = (refereeSnap.data() || {}).profile || {};
+    const previousRefCount = Math.max(0, Number(referrerProfile.refCount) || 0);
+    if (previousRefCount >= maxLifetimeRewards) {
+      return { rejected: true, reason: 'This referrer has reached the lifetime reward limit.' };
+    }
+    const newRefCount = previousRefCount + 1;
+    const bonusDays = referralBonusDays(newRefCount);
+    const referralExpiry = referralExpiryFrom(referrerProfile, bonusDays);
+    const lifetime = isLifetimePlan(referrerProfile.plan);
+
+    const referrerUpdate = {
+      'profile.refCount': newRefCount,
+      'profile.referralDaysEarned': Math.max(0, Number(referrerProfile.referralDaysEarned) || 0) + bonusDays,
+      'profile.lastReferralBonus': bonusDays,
+      'profile.lastReferralDate': nowIso
+    };
+    if (!lifetime) {
+      referrerUpdate['profile.plan'] = 'referral';
+      referrerUpdate['profile.planExpiry'] = referralExpiry;
+    }
+    transaction.update(referrerRef, referrerUpdate);
+
+    const refereeIsPaid = refereeProfile.plan && refereeProfile.plan !== 'free'
+      && (isLifetimePlan(refereeProfile.plan) || String(refereeProfile.planExpiry || '') >= todayIST());
+    const refereeUpdate = { 'profile.referredBy': referrerUid };
+    if (!refereeIsPaid) {
+      refereeUpdate['profile.plan'] = 'referral_welcome';
+      refereeUpdate['profile.planExpiry'] = addDaysIST(1);
+    }
+    transaction.update(refereeRef, refereeUpdate);
+    transaction.create(accountRef, {
+      refereeUid,
+      referrerUid,
+      eligibility: 'verified-new-account',
+      createdAt: global._fbAdmin.firestore.FieldValue.serverTimestamp()
+    });
+    transaction.set(logRef, {
+      referrer: referrerUid,
+      referee: refereeUid,
+      bonusDays,
+      totalRefCount: newRefCount,
+      date: nowIso
+    });
+    return { bonusDays, duplicate: false };
+  });
+}
+
+function couponExpiryMillis(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/* Payment amount, coupon eligibility, usage counts and immutable pending
+   record creation are computed under Admin credentials. Browser totals are
+   display-only and cannot mint discounts or mutate commerce counters. */
+async function submitPaymentForUser(actor, body) {
+  const uid = actor.uid;
+  const planId = String(body.planId || '').trim();
+  const rawTxnId = String(body.txnId || '').trim();
+  const txnId = rawTxnId.toUpperCase();
+  const couponCode = String(body.couponCode || '').trim().toUpperCase();
+  const proofBase64 = String(body.proofBase64 || '');
+  const proofContentType = String(body.proofContentType || '').toLowerCase();
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(planId) || txnId.length < 6 || txnId.length > 100) {
+    throw Object.assign(new Error('valid plan and transaction ID are required'), { status: 400 });
+  }
+  if (couponCode && !/^[A-Z0-9_-]{2,40}$/.test(couponCode)) {
+    throw Object.assign(new Error('invalid coupon code'), { status: 400 });
+  }
+  if (proofBase64 && !['image/jpeg', 'image/png', 'image/webp'].includes(proofContentType)) {
+    throw Object.assign(new Error('payment proof must be a JPEG, PNG, or WebP image'), { status: 400 });
+  }
+
+  /* Historical browser-created payments preserved transaction-ID casing.
+     Firestore has no case-insensitive equality operator, so querying only raw
+     and uppercase variants misses values such as "AbC123". Scan the complete
+     legacy field before creating the canonical uniqueness claim. New-vs-new
+     races are still serialized by payment_txn_claims inside the transaction. */
+  const historicalPayments = await db.collection('payments').select('txnId').get();
+  const historicalMatch = historicalPayments.docs.some(doc => {
+    const value = String((doc.data() || {}).txnId || '').trim().toUpperCase();
+    return value && value === txnId;
+  });
+  if (historicalMatch) {
+    throw Object.assign(new Error('this transaction ID was already submitted'), { status: 409 });
+  }
+
+  const planRef = db.collection('plans').doc(planId);
+  const userRef = db.collection('users').doc(uid);
+  const paymentRef = db.collection('payments').doc();
+  let screenshotPath = null;
+  let uploadedProof = null;
+  if (proofBase64) {
+    if (!storageBucket) throw Object.assign(new Error('payment proof storage is unavailable'), { status: 503 });
+    let proof;
+    try { proof = Buffer.from(proofBase64, 'base64'); }
+    catch (error) { throw Object.assign(new Error('invalid payment proof encoding'), { status: 400 }); }
+    if (!proof.length || proof.length > 3 * 1024 * 1024) {
+      throw Object.assign(new Error('payment proof must be 3 MB or smaller'), { status: 413 });
+    }
+    const isJpeg = proof[0] === 0xff && proof[1] === 0xd8 && proof[2] === 0xff;
+    const isPng = proof.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    const isWebp = proof.subarray(0, 4).toString() === 'RIFF' && proof.subarray(8, 12).toString() === 'WEBP';
+    const detectedType = isJpeg ? 'image/jpeg' : isPng ? 'image/png' : isWebp ? 'image/webp' : '';
+    if (!detectedType || detectedType !== proofContentType) {
+      throw Object.assign(new Error('payment proof content does not match its image type'), { status: 400 });
+    }
+    const extension = detectedType === 'image/jpeg' ? 'jpg' : detectedType === 'image/png' ? 'png' : 'webp';
+    screenshotPath = `payment_screenshots/${uid}/${paymentRef.id}.${extension}`;
+    uploadedProof = storageBucket.file(screenshotPath);
+    await uploadedProof.save(proof, {
+      resumable: false,
+      validation: 'md5',
+      metadata: {
+        contentType: detectedType,
+        cacheControl: 'private,no-store,max-age=0',
+        metadata: { ownerUid: uid, paymentId: paymentRef.id }
+      }
+    });
+  }
+  const txnHash = crypto.createHash('sha256').update(txnId).digest('hex');
+  const claimRef = db.collection('payment_txn_claims').doc(txnHash);
+  const couponRef = couponCode ? db.collection('coupons').doc(couponCode) : null;
+
+  try {
+    return await db.runTransaction(async transaction => {
+    const [planSnap, userSnap, claimSnap] = await Promise.all([
+      transaction.get(planRef), transaction.get(userRef), transaction.get(claimRef)
+    ]);
+    if (!planSnap.exists) throw Object.assign(new Error('selected plan is unavailable'), { status: 400 });
+    if (!userSnap.exists) throw Object.assign(new Error('user profile is unavailable'), { status: 404 });
+    if (claimSnap.exists) throw Object.assign(new Error('this transaction ID was already submitted'), { status: 409 });
+
+    const plan = planSnap.data() || {};
+    const profile = (userSnap.data() || {}).profile || {};
+    const originalAmount = Math.max(0, Math.round(Number(plan.price) || 0));
+    if (!originalAmount) throw Object.assign(new Error('selected plan has an invalid price'), { status: 400 });
+
+    let coupon = null;
+    let percentOff = 0;
+    let discountAmount = 0;
+    if (couponRef) {
+      const couponSnap = await transaction.get(couponRef);
+      if (!couponSnap.exists) throw Object.assign(new Error('invalid coupon code'), { status: 400 });
+      coupon = couponSnap.data() || {};
+      if (coupon.enabled === false) throw Object.assign(new Error('this coupon is disabled'), { status: 400 });
+      const expiry = couponExpiryMillis(coupon.expiresAt);
+      if (expiry && expiry < Date.now()) throw Object.assign(new Error('this coupon has expired'), { status: 400 });
+      if (coupon.maxUses && (Number(coupon.usedCount) || 0) >= Number(coupon.maxUses)) {
+        throw Object.assign(new Error('this coupon is fully used'), { status: 409 });
+      }
+      if (coupon.minAmount && originalAmount < Number(coupon.minAmount)) {
+        throw Object.assign(new Error(`minimum plan amount ₹${coupon.minAmount} required`), { status: 400 });
+      }
+      if (coupon.firstTimeOnly && profile.plan && profile.plan !== 'free') {
+        throw Object.assign(new Error('this coupon is only for first-time upgrades'), { status: 400 });
+      }
+      if (Array.isArray(profile.couponsUsed) && profile.couponsUsed.includes(couponCode)) {
+        throw Object.assign(new Error('this coupon was already used by your account'), { status: 409 });
+      }
+      percentOff = Math.max(1, Math.min(100, Math.round(Number(coupon.percentOff) || 0)));
+      discountAmount = Math.round(originalAmount * percentOff / 100);
+    }
+    const amount = Math.max(1, originalAmount - discountAmount);
+    const createdAt = global._fbAdmin.firestore.FieldValue.serverTimestamp();
+
+    transaction.create(claimRef, { uid, paymentId: paymentRef.id, createdAt });
+    transaction.create(paymentRef, {
+      uid,
+      email: String(actor.email || ''),
+      planId,
+      planName: String(plan.name || planId).slice(0, 120),
+      amount,
+      originalAmount,
+      txnId,
+      screenshotPath: screenshotPath || null,
+      couponCode: couponCode || null,
+      couponPercent: couponCode ? percentOff : null,
+      discountAmount,
+      status: 'pending',
+      createdAt
+    });
+    if (couponRef) {
+      transaction.update(couponRef, {
+        usedCount: global._fbAdmin.firestore.FieldValue.increment(1)
+      });
+      transaction.create(db.collection('coupon_redemptions').doc(paymentRef.id), {
+        couponCode, uid, email: String(actor.email || ''), planId,
+        planName: String(plan.name || planId).slice(0, 120),
+        originalAmount, discountAmount, finalAmount: amount,
+        paymentId: paymentRef.id, createdAt
+      });
+      transaction.update(userRef, {
+        'profile.couponsUsed': global._fbAdmin.firestore.FieldValue.arrayUnion(couponCode)
+      });
+    }
+    return { paymentId: paymentRef.id, amount, originalAmount, percentOff, discountAmount };
+    });
+  } catch (error) {
+    if (uploadedProof) {
+      try { await uploadedProof.delete({ ignoreNotFound: true }); }
+      catch (cleanupError) { console.error('Could not remove orphaned payment proof:', cleanupError.message); }
+    }
+    throw error;
+  }
+}
+
+async function paymentProofUrlForAdmin(adminUid, rawPaymentId) {
+  if (!await isAdminUid(adminUid)) throw Object.assign(new Error('admin access required'), { status: 403 });
+  const paymentId = String(rawPaymentId || '').trim();
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(paymentId)) {
+    throw Object.assign(new Error('valid paymentId is required'), { status: 400 });
+  }
+  const snap = await db.collection('payments').doc(paymentId).get();
+  if (!snap.exists) throw Object.assign(new Error('payment not found'), { status: 404 });
+  const payment = snap.data() || {};
+  if (payment.screenshotPath) {
+    if (!storageBucket || !String(payment.screenshotPath).startsWith('payment_screenshots/')) {
+      throw Object.assign(new Error('payment proof storage is unavailable'), { status: 503 });
+    }
+    const [url] = await storageBucket.file(payment.screenshotPath).getSignedUrl({
+      action: 'read',
+      expires: Date.now() + 5 * 60 * 1000
+    });
+    return { url, expiresInSeconds: 300 };
+  }
+  if (payment.screenshotUrl) return { url: payment.screenshotUrl, legacy: true };
+  throw Object.assign(new Error('this payment has no screenshot'), { status: 404 });
+}
+
+async function startSelfServeTrial(uid) {
+  const userRef = db.collection('users').doc(uid);
+  return db.runTransaction(async transaction => {
+    const snap = await transaction.get(userRef);
+    if (!snap.exists) throw Object.assign(new Error('user profile is unavailable'), { status: 404 });
+    const data = snap.data() || {};
+    const profile = data.profile || {};
+    const appState = data.appState || {};
+    if (profile.proTrialUsed) {
+      throw Object.assign(new Error('the free trial was already used by this account'), { status: 409 });
+    }
+    if (isProUser(data, todayIST())) {
+      throw Object.assign(new Error('this account already has active Pro access'), { status: 409 });
+    }
+
+    /* One-time cutover for trials created by the pre-authoritative client.
+       Adopt only a bounded, parseable trial, stamp its immutable profile
+       marker, and never extend its original expiry. Expired/partial legacy
+       markers are recorded as used so they cannot be reset into a fresh trial. */
+    const legacy = appState.proTrial && typeof appState.proTrial === 'object' ? appState.proTrial : null;
+    if (legacy || appState.proTrialUsed) {
+      const started = legacy && new Date(legacy.startedAt);
+      const expiry = legacy && /^\d{4}-\d{2}-\d{2}$/.test(String(legacy.expiry || ''))
+        ? new Date(`${legacy.expiry}T23:59:59.000Z`)
+        : null;
+      const validLegacy = started && !Number.isNaN(started.getTime()) && expiry
+        && started.getTime() <= Date.now() + 86400000
+        && expiry.getTime() <= started.getTime() + 8 * 86400000;
+      const marker = validLegacy ? legacy.startedAt : `legacy-used:${new Date().toISOString()}`;
+      transaction.update(userRef, {
+        'profile.proTrialUsed': true,
+        'profile.proTrialStartedAt': marker,
+        updatedAt: global._fbAdmin.firestore.FieldValue.serverTimestamp()
+      });
+      if (validLegacy && expiry.getTime() >= Date.now()) {
+        return { trial: legacy, adoptedLegacy: true };
+      }
+      return { used: true, adoptedLegacy: false };
+    }
+
+    const startedAt = new Date().toISOString();
+    const expiry = addDaysIST(7);
+    const trial = { startedAt, expiry, days: 7 };
+    transaction.update(userRef, {
+      'profile.proTrialUsed': true,
+      'profile.proTrialStartedAt': startedAt,
+      'appState.proTrial': trial,
+      'appState.proTrialUsed': true,
+      updatedAt: global._fbAdmin.firestore.FieldValue.serverTimestamp()
+    });
+    return { trial };
+  });
 }
 
 function telegramMediaDocId(uid, fileId) {
@@ -3726,6 +4174,111 @@ const server = http.createServer((req, res) => {
       } catch (error) {
         console.error('❌ /mini/calculation-result error:', error.message);
         if (!error.responded) sendJson(res, error.status || 500, { ok: false, error: error.message || 'request failed' });
+      }
+    })();
+    return;
+  }
+
+  /* ── POST /study-circles/join — authenticated private/public membership ── */
+  if (req.method === 'POST' && req.url === '/study-circles/join') {
+    (async () => {
+      try {
+        const actor = await requireFirebaseUser(req);
+        const body = await readJsonBody(req, res, 2048);
+        await enforceFirestoreRateLimit('studyCircleJoinRates', actor.uid, 10, 60 * 60 * 1000,
+          'Too many circle join attempts. Try again later.');
+        const result = await joinStudyCircle(actor, body);
+        sendJson(res, 200, { ok: true, ...result });
+      } catch (error) {
+        console.error('❌ /study-circles/join error:', error.message);
+        if (!error.responded) sendJson(res, error.status || 500, { ok: false, error: error.message || 'request failed' });
+      }
+    })();
+    return;
+  }
+
+  /* ── POST /study-circles/visibility — rotate/clear private invite code ── */
+  if (req.method === 'POST' && req.url === '/study-circles/visibility') {
+    (async () => {
+      try {
+        const actor = await requireFirebaseUser(req);
+        const body = await readJsonBody(req, res, 2048);
+        await enforceFirestoreRateLimit('studyCircleVisibilityRates', actor.uid, 20, 60 * 60 * 1000,
+          'Too many circle visibility changes. Try again later.');
+        const result = await updateStudyCircleVisibility(actor, body);
+        sendJson(res, 200, { ok: true, ...result });
+      } catch (error) {
+        console.error('❌ /study-circles/visibility error:', error.message);
+        if (!error.responded) sendJson(res, error.status || 500, { ok: false, error: error.message || 'request failed' });
+      }
+    })();
+    return;
+  }
+
+  /* ── POST /referrals/claim — authenticated, transactional reward grant ── */
+  if (req.method === 'POST' && req.url === '/referrals/claim') {
+    (async () => {
+      try {
+        const actor = await requireFirebaseUser(req);
+        const body = await readJsonBody(req, res, 4096);
+        await enforceFirestoreRateLimit('referralClaimRates', actor.uid, 5, 60 * 60 * 1000,
+          'Too many referral attempts. Try again later.');
+        const result = await claimReferralReward(actor.uid, body.referrerUid);
+        sendJson(res, 200, { ok: true, ...result });
+      } catch (error) {
+        console.error('❌ /referrals/claim error:', error.message);
+        if (!error.responded) sendJson(res, error.status || 500, { ok: false, error: error.message || 'request failed' });
+      }
+    })();
+    return;
+  }
+
+  /* ── POST /payments/submit — authenticated commerce transaction ── */
+  if (req.method === 'POST' && req.url === '/payments/submit') {
+    (async () => {
+      try {
+        const actor = await requireFirebaseUser(req);
+        const body = await readJsonBody(req, res, 5 * 1024 * 1024);
+        await enforceFirestoreRateLimit('paymentSubmitRates', actor.uid, 10, 60 * 60 * 1000,
+          'Too many payment submissions. Try again later.');
+        const result = await submitPaymentForUser(actor, body);
+        sendJson(res, 200, { ok: true, ...result });
+      } catch (error) {
+        console.error('❌ /payments/submit error:', error.message);
+        if (!error.responded) sendJson(res, error.status || 500, { ok: false, error: error.message || 'request failed' });
+      }
+    })();
+    return;
+  }
+
+  /* ── POST /payments/proof-url — short-lived admin-only proof access ── */
+  if (req.method === 'POST' && req.url === '/payments/proof-url') {
+    (async () => {
+      try {
+        const actor = await requireFirebaseUser(req);
+        const body = await readJsonBody(req, res, 2048);
+        const result = await paymentProofUrlForAdmin(actor.uid, body.paymentId);
+        sendJson(res, 200, { ok: true, ...result });
+      } catch (error) {
+        console.error('❌ /payments/proof-url error:', error.message);
+        if (!error.responded) sendJson(res, error.status || 500, { ok: false, error: error.message || 'request failed' });
+      }
+    })();
+    return;
+  }
+
+  /* ── POST /trials/start — one-time server-authoritative Pro trial ── */
+  if (req.method === 'POST' && req.url === '/trials/start') {
+    (async () => {
+      try {
+        const actor = await requireFirebaseUser(req);
+        await enforceFirestoreRateLimit('trialStartRates', actor.uid, 3, 60 * 60 * 1000,
+          'Too many trial attempts. Try again later.');
+        const result = await startSelfServeTrial(actor.uid);
+        sendJson(res, 200, { ok: true, ...result });
+      } catch (error) {
+        console.error('❌ /trials/start error:', error.message);
+        sendJson(res, error.status || 500, { ok: false, error: error.message || 'request failed' });
       }
     })();
     return;

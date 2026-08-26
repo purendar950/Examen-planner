@@ -334,7 +334,9 @@ def _active_pro_entitlement(user_data):
             pass
 
     trial = ((user_data or {}).get("appState") or {}).get("proTrial") or {}
-    if profile.get("trialSuspended") or not trial.get("startedAt") or not trial.get("expiry"):
+    if (profile.get("trialSuspended") or not trial.get("startedAt") or not trial.get("expiry")):
+        return False
+    if profile.get("proTrialUsed") is not True or profile.get("proTrialStartedAt") != trial.get("startedAt"):
         return False
     try:
         started = datetime.fromisoformat(str(trial["startedAt"]).replace("Z", "+00:00"))
