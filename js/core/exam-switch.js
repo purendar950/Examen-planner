@@ -6,6 +6,15 @@ function getActiveSubjects() {
   return ALL_EXAMS[currentExam].subjects || SUBJECTS;
 }
 
+function openExamCategory(examId) {
+  const activeButton = document.getElementById('examBtn-' + examId);
+  const category = activeButton && activeButton.closest('.exam-category');
+  if (!category) return;
+  document.querySelectorAll('.exam-category').forEach(other => {
+    other.open = other === category;
+  });
+}
+
 function switchExam(examId, opts) {
   opts = opts || {};
   if (currentExam === examId) return;
@@ -21,6 +30,7 @@ function switchExam(examId, opts) {
   document.querySelectorAll('.exam-select-btn').forEach(btn => btn.classList.remove('active'));
   const activeBtn = document.getElementById('examBtn-' + examId);
   if (activeBtn) activeBtn.classList.add('active');
+  openExamCategory(examId);
 
   // Update badge
   const badge = document.getElementById('exam-logo-badge');
@@ -54,6 +64,26 @@ function switchExam(examId, opts) {
   if (!opts.silent) showToast('Switched to ' + exam.name + ' 🎯', 'info');
 }
 
+(function initExamCategories() {
+  const categories = document.querySelectorAll('.exam-category');
+  categories.forEach(category => {
+    const summary = category.querySelector('.exam-category-summary');
+    const firstExamButton = category.querySelector('.exam-select-btn');
+    summary.addEventListener('click', event => {
+      if (category.open) return;
+      event.preventDefault();
+      if (firstExamButton) openExamCategory(firstExamButton.id.replace(/^examBtn-/, ''));
+    });
+    category.addEventListener('toggle', () => {
+      if (!category.open) return;
+      categories.forEach(other => { if (other !== category) other.open = false; });
+    });
+  });
+
+  const activeButton = document.querySelector('.exam-select-btn.active');
+  if (activeButton) openExamCategory(activeButton.id.replace(/^examBtn-/, ''));
+})();
+
 /* Make the active plan + schedule reflect the current exam. Picks the most
    recently created plan for this exam (or clears the views if the exam has
    none) so switching exams never shows another exam's plan. */
@@ -85,4 +115,3 @@ function loadActivePlanForExam() {
   renderSavedPlansList();
   try { if (typeof renderPlannerView === 'function') renderPlannerView(); } catch(e) {}
 }
-

@@ -280,49 +280,83 @@
   <div id="exam-selector-bar" class="exam-selector-bar">
     <span class="exam-selector-label">Exam</span>
     <div class="exam-pills-scroll">
-      <!-- SSC Exams -->
-      <button class="exam-select-btn active" onclick="switchExam('cgl')" id="examBtn-cgl">SSC CGL</button>
-      <button class="exam-select-btn" onclick="switchExam('chsl')" id="examBtn-chsl">SSC CHSL</button>
-      <button class="exam-select-btn" onclick="switchExam('cpo')" id="examBtn-cpo">SSC CPO</button>
-      <button class="exam-select-btn" onclick="switchExam('gd')" id="examBtn-gd">SSC GD Constabl</button>
-      <button class="exam-select-btn" onclick="switchExam('sscje')" id="examBtn-sscje">SSC JE - Junior</button>
-      <button class="exam-select-btn" onclick="switchExam('mts')" id="examBtn-mts">SSC MTS & Haval</button>
-      <button class="exam-select-btn" onclick="switchExam('steno')" id="examBtn-steno">SSC Stenographe</button>
-      <!-- Railways -->
-      <button class="exam-select-btn" onclick="switchExam('rpfsi')" id="examBtn-rpfsi">RPF SI</button>
-      <button class="exam-select-btn" onclick="switchExam('alp')" id="examBtn-alp">RRB ALP</button>
-      <button class="exam-select-btn" onclick="switchExam('rrbgd')" id="examBtn-rrbgd">RRB Group D</button>
-      <button class="exam-select-btn" onclick="switchExam('rrbje')" id="examBtn-rrbje">RRB JE</button>
-      <button class="exam-select-btn" onclick="switchExam('ntpc')" id="examBtn-ntpc">RRB NTPC Atomic</button>
-      <!-- Banking -->
-      <button class="exam-select-btn" onclick="switchExam('ibps')" id="examBtn-ibps">Bank PO Prelims</button>
-      <!-- UPSC & State PSC -->
-      <button class="exam-select-btn" onclick="switchExam('upsc')" id="examBtn-upsc">UPSC Civil Serv</button>
-      <button class="exam-select-btn" onclick="switchExam('epfo')" id="examBtn-epfo">UPSC EPFO</button>
-      <!-- DSSSB -->
-      <button class="exam-select-btn" onclick="switchExam('dsssb')" id="examBtn-dsssb">DSSSB ASO & DAS</button>
-      <!-- Bihar Exams -->
-      <button class="exam-select-btn" onclick="switchExam('biharpolice')" id="examBtn-biharpolice">Bihar Police Co</button>
-      <button class="exam-select-btn" onclick="switchExam('bpsc')" id="examBtn-bpsc">BPSC AEDO</button>
-      <button class="exam-select-btn" onclick="switchExam('bssc')" id="examBtn-bssc">BSSC</button>
-      <!-- UP Exams -->
-      <button class="exam-select-btn" onclick="switchExam('uppolice')" id="examBtn-uppolice">UP Police Const</button>
-      <button class="exam-select-btn" onclick="switchExam('uppolicesi')" id="examBtn-uppolicesi">UP Police Sub I</button>
-      <button class="exam-select-btn" onclick="switchExam('uppcs')" id="examBtn-uppcs">UPPSC RO and AR</button>
-      <!-- CAT(Common Admission Test) -->
-      <button class="exam-select-btn" onclick="switchExam('cat')" id="examBtn-cat">CAT</button>
-      <!-- Defense -->
-      <button class="exam-select-btn" onclick="switchExam('cds')" id="examBtn-cds">Combined Defenc</button>
-      <button class="exam-select-btn" onclick="switchExam('airforce')" id="examBtn-airforce">Indian Air Forc</button>
-      <button class="exam-select-btn" onclick="switchExam('ib')" id="examBtn-ib">Intelligence Bu</button>
-      <button class="exam-select-btn" onclick="switchExam('nda')" id="examBtn-nda">NDA - National </button>
-      <!-- Engineering & Medical -->
-      <button class="exam-select-btn" onclick="switchExam('gate')" id="examBtn-gate">GATE Engineerin</button>
-      <button class="exam-select-btn" onclick="switchExam('jeeadv')" id="examBtn-jeeadv">JEE Advanced</button>
-      <button class="exam-select-btn" onclick="switchExam('jeemain')" id="examBtn-jeemain">JEE Main</button>
-      <button class="exam-select-btn" onclick="switchExam('neet')" id="examBtn-neet">NEET UG</button>
-      <!-- Teaching & Research -->
-      <button class="exam-select-btn" onclick="switchExam('ugcnet')" id="examBtn-ugcnet">UGC NET JRF Pap</button>
+      <details class="exam-category" data-category="ssc" open>
+        <summary class="exam-category-summary"><span>🎓</span><span>SSC</span><span class="exam-category-count">7</span></summary>
+        <div class="exam-category-panel">
+          <button class="exam-select-btn active" onclick="switchExam('cgl')" id="examBtn-cgl">SSC CGL</button>
+          <button class="exam-select-btn" onclick="switchExam('chsl')" id="examBtn-chsl">SSC CHSL</button>
+          <button class="exam-select-btn" onclick="switchExam('cpo')" id="examBtn-cpo">SSC CPO</button>
+          <button class="exam-select-btn" onclick="switchExam('gd')" id="examBtn-gd">SSC GD Constabl</button>
+          <button class="exam-select-btn" onclick="switchExam('sscje')" id="examBtn-sscje">SSC JE - Junior</button>
+          <button class="exam-select-btn" onclick="switchExam('mts')" id="examBtn-mts">SSC MTS & Haval</button>
+          <button class="exam-select-btn" onclick="switchExam('steno')" id="examBtn-steno">SSC Stenographe</button>
+        </div>
+      </details>
+      <details class="exam-category" data-category="railways">
+        <summary class="exam-category-summary"><span>🚆</span><span>Railways</span><span class="exam-category-count">5</span></summary>
+        <div class="exam-category-panel">
+          <button class="exam-select-btn" onclick="switchExam('rpfsi')" id="examBtn-rpfsi">RPF SI</button>
+          <button class="exam-select-btn" onclick="switchExam('alp')" id="examBtn-alp">RRB ALP</button>
+          <button class="exam-select-btn" onclick="switchExam('rrbgd')" id="examBtn-rrbgd">RRB Group D</button>
+          <button class="exam-select-btn" onclick="switchExam('rrbje')" id="examBtn-rrbje">RRB JE</button>
+          <button class="exam-select-btn" onclick="switchExam('ntpc')" id="examBtn-ntpc">RRB NTPC Atomic</button>
+        </div>
+      </details>
+      <details class="exam-category" data-category="banking">
+        <summary class="exam-category-summary"><span>🏦</span><span>Banking</span><span class="exam-category-count">1</span></summary>
+        <div class="exam-category-panel">
+          <button class="exam-select-btn" onclick="switchExam('ibps')" id="examBtn-ibps">Bank PO Prelims</button>
+        </div>
+      </details>
+      <details class="exam-category" data-category="upsc">
+        <summary class="exam-category-summary"><span>🏛️</span><span>UPSC / Central</span><span class="exam-category-count">2</span></summary>
+        <div class="exam-category-panel">
+          <button class="exam-select-btn" onclick="switchExam('upsc')" id="examBtn-upsc">UPSC Civil Serv</button>
+          <button class="exam-select-btn" onclick="switchExam('epfo')" id="examBtn-epfo">UPSC EPFO</button>
+        </div>
+      </details>
+      <details class="exam-category" data-category="state-psc">
+        <summary class="exam-category-summary"><span>🗺️</span><span>State &amp; PSC</span><span class="exam-category-count">7</span></summary>
+        <div class="exam-category-panel">
+          <button class="exam-select-btn" onclick="switchExam('dsssb')" id="examBtn-dsssb">DSSSB ASO & DAS</button>
+          <button class="exam-select-btn" onclick="switchExam('biharpolice')" id="examBtn-biharpolice">Bihar Police Co</button>
+          <button class="exam-select-btn" onclick="switchExam('bpsc')" id="examBtn-bpsc">BPSC AEDO</button>
+          <button class="exam-select-btn" onclick="switchExam('bssc')" id="examBtn-bssc">BSSC</button>
+          <button class="exam-select-btn" onclick="switchExam('uppolice')" id="examBtn-uppolice">UP Police Const</button>
+          <button class="exam-select-btn" onclick="switchExam('uppolicesi')" id="examBtn-uppolicesi">UP Police Sub I</button>
+          <button class="exam-select-btn" onclick="switchExam('uppcs')" id="examBtn-uppcs">UPPSC RO and AR</button>
+        </div>
+      </details>
+      <details class="exam-category" data-category="management">
+        <summary class="exam-category-summary"><span>📈</span><span>Management</span><span class="exam-category-count">1</span></summary>
+        <div class="exam-category-panel">
+          <button class="exam-select-btn" onclick="switchExam('cat')" id="examBtn-cat">CAT</button>
+        </div>
+      </details>
+      <details class="exam-category" data-category="defence">
+        <summary class="exam-category-summary"><span>🛡️</span><span>Defence &amp; Security</span><span class="exam-category-count">4</span></summary>
+        <div class="exam-category-panel">
+          <button class="exam-select-btn" onclick="switchExam('cds')" id="examBtn-cds">Combined Defenc</button>
+          <button class="exam-select-btn" onclick="switchExam('airforce')" id="examBtn-airforce">Indian Air Forc</button>
+          <button class="exam-select-btn" onclick="switchExam('ib')" id="examBtn-ib">Intelligence Bu</button>
+          <button class="exam-select-btn" onclick="switchExam('nda')" id="examBtn-nda">NDA - National </button>
+        </div>
+      </details>
+      <details class="exam-category" data-category="engineering-medical">
+        <summary class="exam-category-summary"><span>⚙️</span><span>Engineering &amp; Medical</span><span class="exam-category-count">4</span></summary>
+        <div class="exam-category-panel">
+          <button class="exam-select-btn" onclick="switchExam('gate')" id="examBtn-gate">GATE Engineerin</button>
+          <button class="exam-select-btn" onclick="switchExam('jeeadv')" id="examBtn-jeeadv">JEE Advanced</button>
+          <button class="exam-select-btn" onclick="switchExam('jeemain')" id="examBtn-jeemain">JEE Main</button>
+          <button class="exam-select-btn" onclick="switchExam('neet')" id="examBtn-neet">NEET UG</button>
+        </div>
+      </details>
+      <details class="exam-category" data-category="teaching-research">
+        <summary class="exam-category-summary"><span>📚</span><span>Teaching &amp; Research</span><span class="exam-category-count">1</span></summary>
+        <div class="exam-category-panel">
+          <button class="exam-select-btn" onclick="switchExam('ugcnet')" id="examBtn-ugcnet">UGC NET JRF Pap</button>
+        </div>
+      </details>
     </div>
   </div>
 

@@ -1539,9 +1539,59 @@
   }
   .exam-select-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
   .exam-select-btn:hover:not(.active) { border-color: var(--muted); color: var(--text); }
-  /* Single-line, horizontally scrollable pill row (scrollbar hidden) */
-  .exam-pills-scroll { -ms-overflow-style: none; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
-  .exam-pills-scroll::-webkit-scrollbar { height: 0; display: none; }
+  /* Collapsible exam categories */
+  .exam-category {
+    flex: 0 0 auto;
+    min-width: fit-content;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--card) 88%, transparent);
+  }
+  .exam-category[open] { flex: 1 1 100%; }
+  .exam-category-summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 30px;
+    padding: 4px 12px;
+    border-radius: inherit;
+    font-size: .75rem;
+    font-weight: 700;
+    color: var(--text);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    list-style: none;
+  }
+  .exam-category-summary::-webkit-details-marker { display: none; }
+  .exam-category-summary::after {
+    content: "";
+    width: 7px;
+    height: 7px;
+    margin-left: 2px;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(45deg);
+    transition: transform .16s ease;
+  }
+  .exam-category[open] > .exam-category-summary::after { transform: rotate(225deg); }
+  .exam-category-summary:hover { border-color: var(--border-strong); background: var(--surface); }
+  .exam-category-count {
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    color: var(--accent);
+    font-size: .64rem;
+    line-height: 1.5;
+  }
+  .exam-category-panel {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    padding-top: 8px;
+  }
 
   /* ══════════════════ RESUME BANNER ══════════════════ */
   .yt-resume-banner {
@@ -6940,6 +6990,7 @@ body {
 #exam-selector-bar.exam-selector-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   min-height: 52px;
   padding: .62rem 1.5rem;
@@ -7059,6 +7110,8 @@ body {
   .sync-indicator { min-height: 28px; padding-inline: 7px; }
   #exam-selector-bar.exam-selector-bar { gap: 8px; min-height: 48px; padding: .52rem 12px; }
   .exam-selector-label { font-size: .61rem; }
+  #exam-selector-bar .exam-category-summary { min-height: 28px; padding: 4px 10px; font-size: .7rem; }
+  #exam-selector-bar .exam-category-count { font-size: .58rem; }
   #exam-selector-bar .exam-select-btn { min-height: 28px; padding: 4px 11px; }
   .main-content { padding: 1rem; }
   .auth-card { padding: 1.6rem 1.25rem; border-radius: 18px; }
