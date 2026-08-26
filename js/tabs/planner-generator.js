@@ -122,23 +122,37 @@ function buildPlanSchedule(cfg, planId) {
          topic becomes its own slot with effort points derived from its size
          (or the chapter difficulty). This replaces days/gap splitting so hard
          chapters naturally consume more calendar budget than easy ones. */
-      if (!isSingle && Array.isArray(ch.topics) && ch.topics.length > 0) {
+      if (Array.isArray(ch.topics) && ch.topics.length > 0) {
         const progress = appState.progress[ch.id] || {};
         if (progress.done) return;
         const topicProgress = progress.topicStatus || {};
+        const topicConfig = cfg.topics || {};
+        const plannedTopics = [];
         ch.topics.forEach((topic, ti) => {
           const tId = topic.id || `${ch.id}-t${ti}`;
           if (topicProgress[tId] === 'done') return;
+          const key = [sub.id, ch.id, tId].map(value => encodeURIComponent(String(value))).join('|');
+          const override = topicConfig[key];
+          if (override && override.included === false) return;
+          plannedTopics.push({
+            ...topic,
+            size: override?.size || topic.size,
+            configKey: key
+          });
+        });
+
+        plannedTopics.forEach((topic, ti) => {
           const pts = effectiveTopicPoints(topic, ch);
           const sizeLabel = effectiveTopicSize(topic, ch);
           slots.push({
             type: 'study',
             ch: meta,
             topic,
-            topicId: tId,
+            topicId: topic.id || `${ch.id}-t${topic.sourceIndex ?? ti}`,
+            topicConfigKey: topic.configKey,
             part: topic.name ? `· ${topic.name}` : '',
             partIndex: ti + 1,
-            totalParts: ch.topics.length,
+            totalParts: plannedTopics.length,
             points: pts,
             sizeLabel,
             planId: planKey,
@@ -245,14 +259,17 @@ function buildPlanSchedule(cfg, planId) {
           /* Point-budget: keep pulling weighted topic slots until the daily
              effort budget is exhausted or this subject runs out of slots. */
           let dayPts = 0;
+          let addedTopics = 0;
           while (cursor[s.subId] < s.slots.length) {
+            if (isSingle && addedTopics >= perDay) break;
             const slot = s.slots[cursor[s.subId]];
             const w = Number(slot.points) || 2;
-            if (dayPts > 0 && dayPts + w > dailyPoints) break;
+            if (!isSingle && dayPts > 0 && dayPts + w > dailyPoints) break;
             if (slot.notBefore && dateStr < slot.notBefore) break;
             dayItems.push(slot);
             cursor[s.subId]++;
             placed++;
+            addedTopics++;
             dayPts += w;
           }
         } else {
@@ -311,7 +328,7 @@ function renderTopicListItems(items, emptyMsg) {
       ? `<span style="font-size:.58rem;padding:1px 5px;border-radius:3px;font-weight:700;${it.sizeLabel==='big'?'background:rgba(239,68,68,.12);color:#ef4444;':it.sizeLabel==='small'?'background:rgba(34,197,94,.12);color:#22c55e;':'background:rgba(245,158,11,.12);color:#f59e0b;'}">${it.sizeLabel==='big'?'B':it.sizeLabel==='small'?'S':'M'}</span>`
       : '';
     const displayName = isWeightedTopic && it.topic
-      ? `${formatChapterName(ch)} · ${it.topic.name}`
+      ? `${ch.subName || ''}${ch.subName ? ' › ' : ''}${formatChapterName(ch)} › ${it.topic.name}`
       : formatChapterName(ch);
     const tag = sizeBadge + (isRevise
       ? `<span style="font-size:.6rem;padding:2px 6px;border-radius:4px;background:rgba(168,85,247,.12);color:#A855F7;white-space:nowrap;">${clickable ? '🔁 Revise now' : '🔁 Revise'}</span>`
