@@ -85,3 +85,6 @@ jobs:
 
       - name: AI Chat — attached YouTube transcript context
         run: python youtube-turbo-proxy/tests/test_ai_chat_youtube.py
+
+      - name: Transcript — which caption language auto-detection returns
+        run: python youtube-turbo-proxy/tests/test_caption_language_choice.py

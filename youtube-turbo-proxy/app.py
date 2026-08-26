@@ -1331,8 +1331,9 @@ def _is_auto_lang(lang):
 def _pick_caption_url(raw, lang):
     """Choose a json3 caption track URL.
 
-    - lang='auto' (or empty): auto-detect — prefer the video's declared
-      language, then any manual caption, then any auto-caption.
+    - lang='auto' (or empty): auto-detect — prefer the video's declared spoken
+      language, then the original (un-translated) auto-caption, then en/hi,
+      then whatever manual captions remain.
     - explicit lang: that language (then its base code), then en/hi, then
       anything available.
     Prefers manual over auto. Returns (url, chosen_lang, kind)."""
@@ -1368,17 +1369,53 @@ def _pick_caption_url(raw, lang):
 
     if _is_auto_lang(lang):
         native = (raw.get("language") or "").strip()
-        order = []
-        if native:
-            order += [native, native.split("-")[0]]
-        order += sorted(subs.keys())          # human captions first
         orig = original_auto_lang()            # the ORIGINAL spoken-language auto track
+        order = []
+        # 1. The declared spoken language, when the player client reports one.
+        #    YouTube keys uploaded captions regionally (hi-IN, pt-BR, es-419,
+        #    de-DE), so a declared "hi" has to reach an "hi-IN" track as well —
+        #    matching the exact key alone silently dropped to tier 3 and
+        #    returned English on a Hindi video.
+        if native:
+            native_base = native.split("-")[0]
+            order += [native, native_base]
+            order += [lg for lg in sorted(subs.keys())
+                      if lg.split("-")[0] == native_base]
+            order += [lg for lg in sorted(autos.keys())
+                      if lg.split("-")[0] == native_base]
+        # 2. YouTube builds the un-translated ASR track from the actual audio, so
+        #    it is the best evidence of what is really spoken whenever
+        #    `language` is missing — which is always, for the 'android' client
+        #    this function is usually called with.
         if orig:
             order.append(orig)
+        # 3. The languages this app's students are served in — but only when
+        #    that track is not itself a machine translation, so an uploaded
+        #    original caption still beats a translated English one.
+        def original_track(lg):
+            for src in (subs, autos):
+                tracks = src.get(lg)
+                if tracks and json3_url(tracks) and not is_translation(tracks):
+                    return True
+            return False
+
+        order += [lg for lg in ("en", "hi") if original_track(lg)]
+        # 4. The rest of the real (un-translated) captions. Sorting only breaks
+        #    ties inside a tier; it must never outrank tiers 1-3.
+        order += [lg for lg in sorted(subs.keys()) if not is_translation(subs[lg])]
+        # 5. en/hi even when machine-translated, then every leftover caption.
         order += ["en", "hi"]
+        order += [lg for lg in sorted(subs.keys()) if is_translation(subs[lg])]
         # IMPORTANT: do NOT add sorted(autos.keys()) here — it is alphabetical
         # (aa, ab, af, ...) and would pick a random auto-TRANSLATION instead of
         # the actual caption. That was the "auto picks nothing useful" bug.
+        # The autos used in tiers 1 and 4 are not that dump: each is filtered to
+        # an exact base-code match against a language something else already
+        # vouched for.
+        # Dumping sorted(subs.keys()) first was the same bug on the manual side:
+        # with multi-language dubs (de-DE, en, es-419, ja, pt-BR) plain sorting
+        # answered in German for an English video, and returned the English
+        # translation for a Hindi lecture that also carried a Hindi track.
     else:
         order = [lang, str(lang).split("-")[0], "en", "hi"]
 
@@ -1458,11 +1495,15 @@ def _extract_transcript(video_id, lang="auto", force=False, persist=True):
         url = "https://www.youtube.com/watch?v=" + video_id
         raw = None
         last_err = None
+        native_hint = ""
+        clients = ["android", "ios", "mweb", "tv", "web"]
+        tried = 0
         # More clients than before: the empty-format-list condition that used to
         # abort this loop is the same bot-gating that can also strip caption
         # tracks from one client while another still returns them. Ordered by
         # how reliably each yields captions without cookies; android stays first.
-        for client in ("android", "ios", "mweb", "tv", "web"):
+        for client in clients:
+            tried += 1
             try:
                 with yt_dlp.YoutubeDL(_transcript_ydl_opts(client)) as ydl:
                     candidate = ydl.extract_info(url, download=False)
@@ -1474,6 +1515,8 @@ def _extract_transcript(video_id, lang="auto", force=False, persist=True):
                 continue
             if candidate is None:
                 continue
+            if not native_hint:
+                native_hint = (candidate.get("language") or "").strip()
             if candidate.get("subtitles") or candidate.get("automatic_captions"):
                 raw = candidate
                 break                         # got tracks — stop here
@@ -1482,8 +1525,33 @@ def _extract_transcript(video_id, lang="auto", force=False, persist=True):
             # client in case this one was caption-gated.
             if raw is None:
                 raw = candidate
+        # The declared language is worth one extra request, but only where it
+        # changes the answer. 'android' is tried first and breaks this loop as
+        # soon as it returns tracks — and it never fills `language` in, so on a
+        # video with several uploaded captions and no ASR track the picker had
+        # no signal at all to rank them by. Probing the remaining clients runs
+        # only in exactly that case, and an untranslatable metadata failure is
+        # simply swallowed below.
+        if raw is not None and _is_auto_lang(lang) and not native_hint:
+            manual_langs = [k for k in (raw.get("subtitles") or {})
+                            if k != "live_chat"]
+            if len(manual_langs) > 1 and not (raw.get("automatic_captions") or {}):
+                for client in clients[tried:]:
+                    try:
+                        with yt_dlp.YoutubeDL(_transcript_ydl_opts(client)) as ydl:
+                            probe = ydl.extract_info(url, download=False)
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("language probe failed on client=%s: %s",
+                                    client, exc)
+                        continue
+                    if probe:
+                        native_hint = (probe.get("language") or "").strip()
+                    if native_hint:
+                        break
         if raw is None:
             raise last_err or RuntimeError("extraction failed")
+        if not (raw.get("language") or "").strip() and native_hint:
+            raw["language"] = native_hint
 
         cap_url, chosen_lang, kind = _pick_caption_url(raw, lang)
         title = raw.get("title")

@@ -31,6 +31,7 @@
     "test:notebook-backend": "python3 youtube-turbo-proxy/tests/test_notebook.py",
     "test:design-failover-backend": "python3 youtube-turbo-proxy/tests/test_design_failover.py",
     "test:requirements-box-backend": "python3 youtube-turbo-proxy/tests/test_requirements_box.py",
+    "test:caption-language": "python3 youtube-turbo-proxy/tests/test_caption_language_choice.py",
     "test:focus-circle": "node tests/focus-circle.test.mjs",
     "test:planner-preview": "node tests/planner-preview.test.mjs"
   },
