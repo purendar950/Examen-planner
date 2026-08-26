@@ -1,13 +1,46 @@
 /* ══════════════════════════════════════════════
    PROGRESS SAVE / LOAD — FIRESTORE + CACHE
 ══════════════════════════════════════════════ */
+const SAVE_DEBOUNCE_MS = 5000;
+const SAVE_MAX_WAIT_MS = 30000;
 let _saveDebounce = null;
+let _saveMaxWait = null;
+let _saveInFlight = null;
+let _saveQueued = false;
 let _lastSavedJSON = '';
 let _lastSavedUid = '';
 let _syncBaselineState = null;
 let _localDirty = false; // true when there are local edits not yet written to Firestore
 let _legacySyncRecoveryBlocked = window._legacySyncRecoveryBlocked === true;
 const _pendingSyncMemory = new Set();
+
+function _clearSaveTimer(name) {
+  if (name === 'debounce' && _saveDebounce) {
+    clearTimeout(_saveDebounce);
+    _saveDebounce = null;
+  }
+  if (name === 'maxWait' && _saveMaxWait) {
+    clearTimeout(_saveMaxWait);
+    _saveMaxWait = null;
+  }
+}
+
+function _ensureSaveMaxWait() {
+  if (!_localDirty || _saveMaxWait || !currentUser) return;
+  _saveMaxWait = setTimeout(function() {
+    _saveMaxWait = null;
+    saveProgressNow();
+  }, SAVE_MAX_WAIT_MS);
+}
+
+function _scheduleProgressSave(delay) {
+  _clearSaveTimer('debounce');
+  _saveDebounce = setTimeout(function() {
+    _saveDebounce = null;
+    saveProgressNow();
+  }, Math.max(0, Number(delay) || SAVE_DEBOUNCE_MS));
+  _ensureSaveMaxWait();
+}
 
 function setLegacySyncRecoveryBlocked(blocked) {
   _legacySyncRecoveryBlocked = blocked === true;
@@ -338,9 +371,10 @@ function saveProgress() {
   // Show saving indicator
   setSyncStatus('saving', '⏳ Saving...');
 
-  // Debounced Firestore write — 2s after last change
-  clearTimeout(_saveDebounce);
-  _saveDebounce = setTimeout(() => saveProgressNow(), 2000);
+  // Debounced Firestore write — 5s after the last change. The max-wait
+  // timer is started only for a dirty editing burst and is not reset by each
+  // keystroke, so continuous work is still checkpointed within 30 seconds.
+  _scheduleProgressSave(SAVE_DEBOUNCE_MS);
 }
 
 /* Firestore rejects any single document larger than 1 MiB (1,048,576 bytes).
@@ -461,8 +495,10 @@ function _firestoreSafeAppState(state) {
   return safe;
 }
 
-async function saveProgressNow() {
+async function _saveProgressSnapshot() {
   if (!currentUser) return false;
+  _clearSaveTimer('debounce');
+  _clearSaveTimer('maxWait');
   if (_legacySyncRecoveryBlocked || window._legacySyncRecoveryBlocked === true) {
     setSyncStatus('error', 'Recovery needed — local copy preserved');
     return false;
@@ -565,21 +601,33 @@ async function saveProgressNow() {
       _clearPendingSync(saveUid);
     } else if (!unchangedDuringWrite) {
       // Edits made while this write was in flight are still pending. Never let
-      // an older completion clear their durable marker; queue the newest state.
+      // an older completion clear their durable marker; the single-flight
+      // drain will immediately write the newest snapshot after this one.
       _localDirty = true;
       _markPendingSync(saveUid, JSON.parse(JSON.stringify(appState)));
-      clearTimeout(_saveDebounce);
-      _saveDebounce = setTimeout(() => saveProgressNow(), 250);
+      _saveQueued = true;
+      setSyncStatus('saving', '⏳ Saving...');
     } else {
       _localDirty = false;
       _clearPendingSync(saveUid);
     }
-    setSyncStatus('saved', '☁ Saved');
-    setTimeout(() => setSyncStatus('', ''), 2500);
+    if (unchangedDuringWrite) {
+      setSyncStatus('saved', '☁ Saved');
+      setTimeout(() => setSyncStatus('', ''), 2500);
+    }
     return true;
   } catch(e) {
-    if (!currentUser || currentUser.uid === saveUid) _localDirty = true;
-    _markPendingSync(saveUid, stateToSave);
+    const sameActiveUser = currentUser && currentUser.uid === saveUid;
+    const latestStateChanged = sameActiveUser && JSON.stringify(appState) !== json;
+    if (!currentUser || sameActiveUser) _localDirty = true;
+    // Never let a rejected older request replace a newer replay snapshot that
+    // was queued while the network write was in flight.
+    if (latestStateChanged) {
+      _markPendingSync(saveUid, JSON.parse(JSON.stringify(appState)));
+      _saveQueued = true;
+    } else {
+      _markPendingSync(saveUid, stateToSave);
+    }
     /* Log the real cause — previously the error was swallowed, which made
        every sync failure impossible to diagnose from the console. */
     const reason = _describeSyncError(e);
@@ -594,11 +642,42 @@ async function saveProgressNow() {
   }
 }
 
-// Auto-save every 30s as final safety net
-setInterval(() => { if (currentUser) saveProgressNow(); }, 30000);
+/* Serialize all cloud saves through one drain. Direct callers (logout,
+   reconnect, inbox acknowledgement, explicit save) share the same promise,
+   while edits that arrive during a write queue exactly one newest snapshot. */
+async function saveProgressNow() {
+  _saveQueued = true;
+  if (_saveInFlight) return _saveInFlight;
+
+  _saveInFlight = (async function() {
+    let result = false;
+    while (_saveQueued) {
+      _saveQueued = false;
+      result = await _saveProgressSnapshot();
+      // Offline and hard failures stay durable in the local replay queue. Do
+      // not spin on them; reconnect or the dirty watchdog will retry later.
+      if (!result && !_saveQueued) break;
+    }
+    return result;
+  })();
+
+  try {
+    return await _saveInFlight;
+  } finally {
+    _saveInFlight = null;
+    if (_localDirty) _ensureSaveMaxWait();
+    else {
+      _clearSaveTimer('debounce');
+      _clearSaveTimer('maxWait');
+    }
+  }
+}
+
+/* The 30-second safety net is armed only while dirty by
+   _ensureSaveMaxWait(). Clean sessions perform no periodic local/cloud I/O. */
 
 /* ── Flush pending changes when the app is hidden or closed ──
-   Mobile browsers often kill backgrounded tabs before the 2s save debounce
+   Mobile browsers often kill backgrounded tabs before the 5s save debounce
    fires, which could lose the user's last change. We flush on every
    exit-ish event so nothing is lost. */
 function flushSaveOnExit() {
@@ -612,8 +691,8 @@ function flushSaveOnExit() {
     localStorage.setItem('cache_' + currentUser.uid, JSON.stringify(appState));
     localStorage.setItem('cache_meta_' + currentUser.uid, String(exitRevision));
   } catch(e) {}
-  /* Cancel the debounce and write to Firestore immediately. */
-  try { clearTimeout(_saveDebounce); } catch(e) {}
+  /* Cancel scheduled timers and write to Firestore immediately. */
+  try { _clearSaveTimer('debounce'); _clearSaveTimer('maxWait'); } catch(e) {}
   try { saveProgressNow(); } catch(e) {}
 }
 document.addEventListener('visibilitychange', function() {

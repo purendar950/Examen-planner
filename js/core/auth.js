@@ -337,7 +337,14 @@ async function handleLogout() {
      or allowing an older cloud snapshot to overwrite the last edit. */
   if (currentUser && currentUser.uid && window._legacySyncRecoveryBlocked !== true) {
     const logoutUid = currentUser.uid;
-    try { clearTimeout(_saveDebounce); } catch (e) {}
+    try {
+      if (typeof _clearSaveTimer === 'function') {
+        _clearSaveTimer('debounce');
+        _clearSaveTimer('maxWait');
+      } else {
+        clearTimeout(_saveDebounce);
+      }
+    } catch (e) {}
     try {
       const logoutRevision = Date.now();
       localStorage.setItem('cache_' + logoutUid, JSON.stringify(appState));
