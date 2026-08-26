@@ -59,9 +59,13 @@ service cloud.firestore {
       return owner(uid)
         && changed.hasOnly([
           'appState', 'updatedAt', 'profile',
-          'telegramInbox', 'calculationAttemptInbox', 'mockAttemptInbox'
+          'telegramInbox', 'calculationAttemptInbox', 'mockAttemptInbox',
+          'stickyNotes', 'stickyFolders', 'stickyBrainMeta'
         ])
         && (!changed.hasAny(['appState']) || request.resource.data.appState is map)
+        && (!changed.hasAny(['stickyNotes']) || request.resource.data.stickyNotes is list)
+        && (!changed.hasAny(['stickyFolders']) || request.resource.data.stickyFolders is list)
+        && (!changed.hasAny(['stickyBrainMeta']) || request.resource.data.stickyBrainMeta is map)
         && (!changed.hasAny(['profile']) || validProfileUpdate())
         && validInboxClear('telegramInbox')
         && validInboxClear('calculationAttemptInbox')

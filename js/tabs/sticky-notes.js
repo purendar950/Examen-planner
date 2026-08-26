@@ -48,6 +48,11 @@
   };
   var NOTES_KEY = 'preppath_sticky_notes';
   var FOLDERS_KEY = 'preppath_sticky_folders';
+  var META_KEY = 'preppath_sticky_meta';
+  var LEGACY_OWNER_KEY = 'preppath_sticky_legacy_owner';
+  var LEGACY_MIGRATION_KEY = 'preppath_sticky_legacy_migration';
+  var STICKY_CLOUD_DEBOUNCE_MS = 5000;
+  var STICKY_CLOUD_MAX_WAIT_MS = 30000;
 
   /* ── state ── */
   var notes = [];
@@ -68,6 +73,19 @@
   var selectedAIImageModel = '';
   var selectedAIDepth = 'standard';
   var aiModelsLoaded = false;
+  var stickyMeta = null;
+  var stickyUid = 'guest';
+  var stickyCloudTimer = null;
+  var stickyMaxWaitTimer = null;
+  var stickyCloudInFlight = null;
+  var stickyCloudQueued = false;
+  var stickyDirty = false;
+  var stickyMutationRevision = 0;
+  var stickyLoadGeneration = 0;
+  var stickyLoadInFlight = null;
+  var stickyLoadInFlightUid = '';
+  var stickyHydratedUid = '';
+  var stickyAuthBound = false;
 
   /* ── helpers ── */
   function esc(s) { return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
@@ -171,39 +189,435 @@
   function setNum(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; }
 
   /* ── persistence ── */
-  function loadLocal() {
-    try { notes = JSON.parse(localStorage.getItem(NOTES_KEY) || '[]'); } catch (e) { notes = []; }
-    try { folders = JSON.parse(localStorage.getItem(FOLDERS_KEY) || '[]'); } catch (e) { folders = []; }
-    if (!Array.isArray(notes)) notes = [];
-    if (!Array.isArray(folders)) folders = [];
-    if (normalizeCardColors()) saveLocal();
+  function emptyStickyMeta() {
+    return { version: 1, revision: 0, updatedAt: 0, dirty: false, deletedNotes: {}, deletedFolders: {} };
+  }
+  function cloneValue(value, fallback) {
+    try { return JSON.parse(JSON.stringify(value)); } catch (e) { return fallback; }
+  }
+  function normalizeStickyMeta(value) {
+    var source = value && typeof value === 'object' ? value : {};
+    return {
+      version: 1,
+      revision: Math.max(0, Number(source.revision) || 0),
+      updatedAt: toMillis(source.updatedAt),
+      dirty: source.dirty === true,
+      deletedNotes: source.deletedNotes && typeof source.deletedNotes === 'object' ? cloneValue(source.deletedNotes, {}) : {},
+      deletedFolders: source.deletedFolders && typeof source.deletedFolders === 'object' ? cloneValue(source.deletedFolders, {}) : {}
+    };
+  }
+  function toMillis(value) {
+    if (!value) return 0;
+    if (typeof value === 'number') return Math.max(0, value);
+    if (typeof value === 'string') return Math.max(0, Date.parse(value) || Number(value) || 0);
+    if (typeof value.toMillis === 'function') { try { return Math.max(0, value.toMillis()); } catch (e) {} }
+    if (typeof value.seconds === 'number') return Math.max(0, value.seconds * 1000 + Math.floor((value.nanoseconds || 0) / 1000000));
+    return 0;
+  }
+  function stickyStorageKey(base, uid) {
+    return uid && uid !== 'guest' ? base + '_' + uid : base;
+  }
+  function readStoredArray(key) {
+    try {
+      var parsed = JSON.parse(localStorage.getItem(key) || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) { return []; }
+  }
+  function loadLegacyMigration(uid, notesKey, foldersKey) {
+    if (!uid || uid === 'guest') return null;
+    var migrationKey = stickyStorageKey(LEGACY_MIGRATION_KEY, uid);
+    var staged = null;
+    try { staged = JSON.parse(localStorage.getItem(migrationKey) || 'null'); } catch (e) {}
+    if (staged && Array.isArray(staged.notes) && Array.isArray(staged.folders)) return staged;
+
+    var owner = '';
+    var hasLegacy = false;
+    var destinationIncomplete = false;
+    try {
+      owner = localStorage.getItem(LEGACY_OWNER_KEY) || '';
+      hasLegacy = localStorage.getItem(NOTES_KEY) !== null || localStorage.getItem(FOLDERS_KEY) !== null;
+      destinationIncomplete = localStorage.getItem(notesKey) === null || localStorage.getItem(foldersKey) === null;
+    } catch (e) { return null; }
+    if (!hasLegacy || !destinationIncomplete || (owner && owner !== uid)) return null;
+
+    var candidate = { version: 1, notes: readStoredArray(NOTES_KEY), folders: readStoredArray(FOLDERS_KEY) };
+    var serialized = JSON.stringify(candidate);
+    try {
+      // Stage both arrays atomically in one localStorage value when capacity
+      // allows it. If quota blocks staging, still use the intact legacy data
+      // in memory; partial scoped writes are retried from legacy next load.
+      localStorage.setItem(migrationKey, serialized);
+    } catch (e) {}
+    try {
+      // Claiming ownership prevents another account on this browser from
+      // importing the same legacy data. The legacy source remains untouched
+      // until all scoped destination keys are present.
+      if (!owner) localStorage.setItem(LEGACY_OWNER_KEY, uid);
+    } catch (e) {}
+    return candidate;
+  }
+  function loadLocal(uid) {
+    stickyUid = uid || getUid();
+    var notesKey = stickyStorageKey(NOTES_KEY, stickyUid);
+    var foldersKey = stickyStorageKey(FOLDERS_KEY, stickyUid);
+    var metaKey = stickyStorageKey(META_KEY, stickyUid);
+    var migration = loadLegacyMigration(stickyUid, notesKey, foldersKey);
+
+    var hasScopedNotes = false;
+    var hasScopedFolders = false;
+    try {
+      hasScopedNotes = localStorage.getItem(notesKey) !== null;
+      hasScopedFolders = localStorage.getItem(foldersKey) !== null;
+    } catch (e) {}
+    notes = hasScopedNotes ? readStoredArray(notesKey) : cloneValue(migration && migration.notes, []);
+    folders = hasScopedFolders ? readStoredArray(foldersKey) : cloneValue(migration && migration.folders, []);
+    try { stickyMeta = normalizeStickyMeta(JSON.parse(localStorage.getItem(metaKey) || 'null')); }
+    catch (e) { stickyMeta = emptyStickyMeta(); }
+    stickyDirty = stickyMeta.dirty === true;
+
+    var normalized = normalizeCardColors();
+    if (normalized) {
+      var stamp = now();
+      notes.forEach(function (note) { if (note && typeof note === 'object') note.updatedAt = stamp; });
+      stickyMeta.updatedAt = Date.now();
+      stickyMeta.dirty = true;
+      stickyDirty = true;
+      stickyMutationRevision += 1;
+    }
+    saveLocal();
   }
   function saveLocal() {
-    try { localStorage.setItem(NOTES_KEY, JSON.stringify(notes)); } catch (e) {}
-    try { localStorage.setItem(FOLDERS_KEY, JSON.stringify(folders)); } catch (e) {}
+    if (!stickyMeta) stickyMeta = emptyStickyMeta();
+    stickyMeta.dirty = stickyDirty === true;
+    var notesKey = stickyStorageKey(NOTES_KEY, stickyUid);
+    var foldersKey = stickyStorageKey(FOLDERS_KEY, stickyUid);
+    var metaKey = stickyStorageKey(META_KEY, stickyUid);
+    try { localStorage.setItem(notesKey, JSON.stringify(notes)); } catch (e) {}
+    try { localStorage.setItem(foldersKey, JSON.stringify(folders)); } catch (e) {}
+    try { localStorage.setItem(metaKey, JSON.stringify(stickyMeta)); } catch (e) {}
+    // Keep the atomic migration staging record until every destination key is
+    // present. A quota failure on one key can then be recovered next load.
+    if (stickyUid !== 'guest') {
+      try {
+        if (localStorage.getItem(notesKey) !== null && localStorage.getItem(foldersKey) !== null
+            && localStorage.getItem(metaKey) !== null) {
+          localStorage.removeItem(stickyStorageKey(LEGACY_MIGRATION_KEY, stickyUid));
+        }
+      } catch (e) {}
+    }
   }
-  function saveToFirebase() {
+  function conflictMillis(value) {
+    var parsed = toMillis(value);
+    // A badly skewed device clock must not create a permanently unbeatable
+    // record or tombstone. Clamp values more than five minutes in the future;
+    // the corrected value is persisted by the next transaction.
+    return parsed > Date.now() + 5 * 60 * 1000 ? Date.now() : parsed;
+  }
+  function mergeTombstones(localValues, remoteValues) {
+    var merged = {};
+    [remoteValues, localValues].forEach(function (values) {
+      if (!values || typeof values !== 'object') return;
+      Object.keys(values).forEach(function (id) {
+        merged[id] = Math.max(conflictMillis(merged[id]), conflictMillis(values[id]));
+      });
+    });
+    return merged;
+  }
+  function recordUpdatedAt(record) {
+    return conflictMillis(record && (record.updatedAt || record.createdAt));
+  }
+  function mergeRecordArrays(localRecords, remoteRecords, tombstones, preferLocal) {
+    var localById = {};
+    var remoteById = {};
+    var order = [];
+    var seen = {};
+    localRecords = Array.isArray(localRecords) ? localRecords : [];
+    remoteRecords = Array.isArray(remoteRecords) ? remoteRecords : [];
+
+    localRecords.forEach(function (record) { if (record && record.id) localById[record.id] = record; });
+    remoteRecords.forEach(function (record) { if (record && record.id) remoteById[record.id] = record; });
+    (preferLocal ? localRecords : remoteRecords).concat(preferLocal ? remoteRecords : localRecords).forEach(function (record) {
+      if (!record || !record.id || seen[record.id]) return;
+      seen[record.id] = true;
+      order.push(record.id);
+    });
+
+    return order.map(function (id) {
+      var localRecord = localById[id];
+      var remoteRecord = remoteById[id];
+      var chosen;
+      if (!localRecord) chosen = remoteRecord;
+      else if (!remoteRecord) chosen = localRecord;
+      else {
+        var localTime = recordUpdatedAt(localRecord);
+        var remoteTime = recordUpdatedAt(remoteRecord);
+        chosen = localTime === remoteTime ? (preferLocal ? localRecord : remoteRecord)
+          : (localTime > remoteTime ? localRecord : remoteRecord);
+      }
+      if (conflictMillis(tombstones && tombstones[id]) >= recordUpdatedAt(chosen)) return null;
+      var safeRecord = cloneValue(chosen, chosen);
+      if (safeRecord && toMillis(safeRecord.updatedAt) > Date.now() + 5 * 60 * 1000) {
+        safeRecord.updatedAt = new Date(recordUpdatedAt(safeRecord)).toISOString();
+      }
+      return safeRecord;
+    }).filter(function (record) { return !!record; });
+  }
+  function mergeStickySnapshots(localNotes, localFolders, localMeta, remoteData, preferLocal) {
+    var remoteMeta = normalizeStickyMeta(remoteData && remoteData.stickyBrainMeta);
+    var normalizedLocalMeta = normalizeStickyMeta(localMeta);
+    var deletedNotes = mergeTombstones(normalizedLocalMeta.deletedNotes, remoteMeta.deletedNotes);
+    var deletedFolders = mergeTombstones(normalizedLocalMeta.deletedFolders, remoteMeta.deletedFolders);
+    return {
+      notes: mergeRecordArrays(localNotes, remoteData && remoteData.stickyNotes, deletedNotes, preferLocal),
+      folders: mergeRecordArrays(localFolders, remoteData && remoteData.stickyFolders, deletedFolders, preferLocal),
+      meta: {
+        version: 1,
+        revision: Math.max(normalizedLocalMeta.revision, remoteMeta.revision),
+        updatedAt: Math.max(normalizedLocalMeta.updatedAt, remoteMeta.updatedAt),
+        dirty: false,
+        deletedNotes: deletedNotes,
+        deletedFolders: deletedFolders
+      }
+    };
+  }
+  function stickyFirebaseReady(uid) {
+    return uid && uid !== 'guest' && typeof _fbReady !== 'undefined' && _fbReady
+      && typeof db !== 'undefined' && db && navigator.onLine !== false;
+  }
+  function clearStickyTimer(kind) {
+    if (kind === 'debounce' && stickyCloudTimer) { clearTimeout(stickyCloudTimer); stickyCloudTimer = null; }
+    if (kind === 'maxWait' && stickyMaxWaitTimer) { clearTimeout(stickyMaxWaitTimer); stickyMaxWaitTimer = null; }
+  }
+  function ensureStickyMaxWait() {
+    if (!stickyDirty || stickyMaxWaitTimer || !stickyFirebaseReady(stickyUid)) return;
+    stickyMaxWaitTimer = setTimeout(function () {
+      stickyMaxWaitTimer = null;
+      flushStickyToFirebase();
+    }, STICKY_CLOUD_MAX_WAIT_MS);
+  }
+  function scheduleStickyCloudSave(immediate) {
+    if (!stickyFirebaseReady(stickyUid)) return;
+    clearStickyTimer('debounce');
+    stickyCloudTimer = setTimeout(function () {
+      stickyCloudTimer = null;
+      flushStickyToFirebase();
+    }, immediate ? 0 : STICKY_CLOUD_DEBOUNCE_MS);
+    ensureStickyMaxWait();
+  }
+  function serverTimestamp() {
     try {
-      if (typeof _fbReady === 'undefined' || !_fbReady || typeof db === 'undefined' || !db) return;
-      var u = getUid(); if (u === 'guest') return;
-      db.collection('users').doc(u).set({ stickyNotes: notes, stickyFolders: folders }, { merge: true }).catch(function () {});
+      if (typeof firebase !== 'undefined' && firebase.firestore && firebase.firestore.FieldValue) {
+        return firebase.firestore.FieldValue.serverTimestamp();
+      }
     } catch (e) {}
+    return new Date().toISOString();
+  }
+  function writeStickySnapshot(uid, localNotes, localFolders, localMeta) {
+    var ref = db.collection('users').doc(uid);
+    function buildResult(remoteData) {
+      var merged = mergeStickySnapshots(localNotes, localFolders, localMeta, remoteData || {}, true);
+      merged.meta.revision = Math.max(merged.meta.revision, normalizeStickyMeta(remoteData && remoteData.stickyBrainMeta).revision) + 1;
+      merged.meta.updatedAt = Date.now();
+      merged.meta.dirty = false;
+      return merged;
+    }
+    function payloadFor(result) {
+      return {
+        stickyNotes: result.notes,
+        stickyFolders: result.folders,
+        stickyBrainMeta: {
+          version: 1,
+          revision: result.meta.revision,
+          updatedAt: serverTimestamp(),
+          deletedNotes: result.meta.deletedNotes,
+          deletedFolders: result.meta.deletedFolders
+        }
+      };
+    }
+
+    if (typeof db.runTransaction === 'function') {
+      return db.runTransaction(function (transaction) {
+        return transaction.get(ref).then(function (snap) {
+          if (!snap.exists) {
+            var missingUser = new Error('User profile must be provisioned before Sticky Brain can sync');
+            missingUser.code = 'failed-precondition';
+            throw missingUser;
+          }
+          var result = buildResult(snap.data());
+          transaction.update(ref, payloadFor(result));
+          return result;
+        });
+      });
+    }
+
+    return ref.get().then(function (snap) {
+      if (!snap.exists) {
+        var missingUser = new Error('User profile must be provisioned before Sticky Brain can sync');
+        missingUser.code = 'failed-precondition';
+        throw missingUser;
+      }
+      var result = buildResult(snap.data());
+      return ref.update(payloadFor(result)).then(function () { return result; });
+    });
+  }
+  function saveStickySnapshot() {
+    clearStickyTimer('debounce');
+    clearStickyTimer('maxWait');
+    var uid = stickyUid;
+    if (!stickyFirebaseReady(uid)) return Promise.resolve(false);
+    var mutationRevision = stickyMutationRevision;
+    var localNotes = cloneValue(notes, []);
+    var localFolders = cloneValue(folders, []);
+    var localMeta = normalizeStickyMeta(stickyMeta);
+
+    return writeStickySnapshot(uid, localNotes, localFolders, localMeta).then(function (result) {
+      if (stickyUid !== uid) return true;
+      if (stickyMutationRevision === mutationRevision) {
+        notes = result.notes;
+        folders = result.folders;
+        stickyMeta = normalizeStickyMeta(result.meta);
+        stickyDirty = false;
+        saveLocal();
+        renderAll();
+      } else {
+        stickyMeta.revision = Math.max(stickyMeta.revision || 0, result.meta.revision || 0);
+        stickyDirty = true;
+        stickyMeta.dirty = true;
+        saveLocal();
+        stickyCloudQueued = true;
+      }
+      return true;
+    }).catch(function (error) {
+      // A rejected request from an account that has since signed out/switched
+      // must never dirty or overwrite the new account's local snapshot.
+      if (stickyUid === uid) {
+        stickyDirty = true;
+        if (!stickyMeta) stickyMeta = emptyStickyMeta();
+        stickyMeta.dirty = true;
+        saveLocal();
+        if (stickyMutationRevision !== mutationRevision) stickyCloudQueued = true;
+      }
+      console.warn('[sticky-notes] Cloud sync failed; local copy retained', error);
+      return false;
+    });
+  }
+  function flushStickyToFirebase() {
+    stickyCloudQueued = true;
+    if (stickyCloudInFlight) return stickyCloudInFlight;
+    stickyCloudInFlight = (async function () {
+      var result = false;
+      while (stickyCloudQueued) {
+        stickyCloudQueued = false;
+        result = await saveStickySnapshot();
+        if (!result && !stickyCloudQueued) break;
+      }
+      return result;
+    })();
+    return stickyCloudInFlight.finally(function () {
+      stickyCloudInFlight = null;
+      if (stickyDirty) ensureStickyMaxWait();
+      else { clearStickyTimer('debounce'); clearStickyTimer('maxWait'); }
+    });
   }
   function loadFromFirebase() {
-    try {
-      if (typeof _fbReady === 'undefined' || !_fbReady || typeof db === 'undefined' || !db) return;
-      var u = getUid(); if (u === 'guest') return;
-      db.collection('users').doc(u).get().then(function (snap) {
-        if (!snap.exists) return;
-        var d = snap.data();
-        if (Array.isArray(d.stickyNotes) && d.stickyNotes.length > notes.length) { notes = d.stickyNotes; saveLocal(); }
-        if (Array.isArray(d.stickyFolders) && d.stickyFolders.length > folders.length) { folders = d.stickyFolders; saveLocal(); }
-        if (normalizeCardColors()) { saveLocal(); saveToFirebase(); }
-        renderAll();
-      }).catch(function () {});
-    } catch (e) {}
+    var uid = stickyUid;
+    if (!stickyFirebaseReady(uid)) return Promise.resolve(false);
+    if (stickyLoadInFlight && stickyLoadInFlightUid === uid) return stickyLoadInFlight;
+    var loadGeneration = ++stickyLoadGeneration;
+    var mutationAtStart = stickyMutationRevision;
+    stickyLoadInFlightUid = uid;
+    stickyLoadInFlight = db.collection('users').doc(uid).get().then(function (snap) {
+      if (stickyUid !== uid || loadGeneration !== stickyLoadGeneration) return;
+      if (!snap.exists) { stickyHydratedUid = uid; return; }
+      var remoteData = snap.data() || {};
+      var preferLocal = stickyDirty || stickyMutationRevision !== mutationAtStart;
+      var merged = mergeStickySnapshots(notes, folders, stickyMeta, remoteData, preferLocal);
+      var remoteNotes = Array.isArray(remoteData.stickyNotes) ? remoteData.stickyNotes : [];
+      var remoteFolders = Array.isArray(remoteData.stickyFolders) ? remoteData.stickyFolders : [];
+      var remoteMeta = normalizeStickyMeta(remoteData.stickyBrainMeta);
+      var cloudDiffers = JSON.stringify(merged.notes) !== JSON.stringify(remoteNotes)
+        || JSON.stringify(merged.folders) !== JSON.stringify(remoteFolders)
+        || JSON.stringify(merged.meta.deletedNotes) !== JSON.stringify(remoteMeta.deletedNotes)
+        || JSON.stringify(merged.meta.deletedFolders) !== JSON.stringify(remoteMeta.deletedFolders);
+
+      notes = merged.notes;
+      folders = merged.folders;
+      stickyMeta = merged.meta;
+      stickyMeta.revision = Math.max(stickyMeta.revision, remoteMeta.revision);
+      stickyDirty = preferLocal || cloudDiffers;
+      if (normalizeCardColors()) {
+        var stamp = now();
+        notes.forEach(function (note) { if (note && typeof note === 'object') note.updatedAt = stamp; });
+        stickyMutationRevision += 1;
+        stickyDirty = true;
+      }
+      stickyMeta.dirty = stickyDirty;
+      stickyHydratedUid = uid;
+      saveLocal();
+      renderAll();
+      if (stickyDirty) scheduleStickyCloudSave(false);
+    }).catch(function (error) {
+      console.warn('[sticky-notes] Cloud load failed; using local copy', error);
+      return false;
+    }).finally(function () {
+      if (stickyLoadInFlightUid === uid) {
+        stickyLoadInFlight = null;
+        stickyLoadInFlightUid = '';
+      }
+    });
+    return stickyLoadInFlight;
   }
-  function persist() { saveLocal(); saveToFirebase(); }
+  function persist(options) {
+    options = options || {};
+    if (!stickyMeta) stickyMeta = emptyStickyMeta();
+    var mutationTime = Date.now();
+    if (options.deletedNoteId) stickyMeta.deletedNotes[options.deletedNoteId] = mutationTime;
+    if (options.deletedFolderId) stickyMeta.deletedFolders[options.deletedFolderId] = mutationTime;
+    stickyMeta.updatedAt = mutationTime;
+    stickyMeta.dirty = true;
+    stickyDirty = true;
+    stickyMutationRevision += 1;
+    saveLocal();
+    scheduleStickyCloudSave(options.immediate === true);
+  }
+  function switchStickyUser(uid) {
+    uid = uid || 'guest';
+    if (uid === stickyUid) {
+      if (uid !== 'guest' && stickyHydratedUid !== uid) loadFromFirebase();
+      return;
+    }
+    clearStickyTimer('debounce');
+    clearStickyTimer('maxWait');
+    stickyLoadGeneration += 1;
+    stickyCloudQueued = false;
+    stickyUid = uid;
+    stickyDirty = false;
+    stickyMutationRevision = 0;
+    selectedNoteId = null;
+    loadLocal(uid);
+    renderAll();
+    if (uid !== 'guest') loadFromFirebase();
+  }
+  function bindStickyAuth(attempt) {
+    if (stickyAuthBound) return;
+    if (typeof auth === 'undefined' || !auth || typeof auth.onAuthStateChanged !== 'function') {
+      if ((attempt || 0) < 20) setTimeout(function () { bindStickyAuth((attempt || 0) + 1); }, 250);
+      return;
+    }
+    stickyAuthBound = true;
+    auth.onAuthStateChanged(function (user) { switchStickyUser(user && user.uid ? user.uid : 'guest'); });
+  }
+
+  window.addEventListener('online', function () {
+    if (stickyDirty) flushStickyToFirebase();
+    else if (stickyUid !== 'guest') loadFromFirebase();
+  });
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden' && stickyDirty) flushStickyToFirebase();
+  });
+  window.addEventListener('pagehide', function () {
+    if (stickyDirty) flushStickyToFirebase();
+  });
 
   /* ── backend helper for AI (matches ai-chat.js backendAuthFetch pattern) ── */
   function backendFetch(path, options) {
@@ -780,9 +1194,10 @@
     mc.appendChild(page);
     injectNavTab();
     bindEvents();
-    loadLocal();
+    loadLocal(getUid());
     renderAll();
     loadFromFirebase();
+    bindStickyAuth(0);
     fetchAIModels().then(function () { renderAICreatePanel(); });
   }
 
@@ -1189,7 +1604,7 @@
       var action = actionEl.dataset.detailAction;
       if (action === 'close') close();
       else if (action === 'edit') { selectedNoteId = currentNote().id; close(); renderBoard(); renderEditor(); }
-      else if (action === 'pin') { var note = currentNote(); note.pinned = !note.pinned; persist(); renderAll(); renderDetail(); }
+      else if (action === 'pin') { var note = currentNote(); note.pinned = !note.pinned; note.updatedAt = now(); persist(); renderAll(); renderDetail(); }
     });
     var prev = overlay.querySelector('.sb-detail-prev');
     var next = overlay.querySelector('.sb-detail-next');
@@ -1297,7 +1712,7 @@
           var noteEl = pinBtn.closest('.sb-note');
           if (!noteEl) return;
           var n = getNote(noteEl.dataset.noteId);
-          if (n) { n.pinned = !n.pinned; persist(); renderAll(); }
+          if (n) { n.pinned = !n.pinned; n.updatedAt = now(); persist(); renderAll(); }
           return;
         }
         if (Date.now() < suppressClickUntil) { suppressClickUntil = 0; return; }
@@ -1366,8 +1781,8 @@
           }
           if (dragged) {
             visible.splice(Math.min(targetIndex, visible.length), 0, dragged);
-            visible.forEach(function (n, i) { n.order = visible.length - i; });
-            dragged.updatedAt = now();
+            var reorderedAt = now();
+            visible.forEach(function (n, i) { n.order = visible.length - i; n.updatedAt = reorderedAt; });
             persist();
             renderBoard();
           }
@@ -1427,7 +1842,8 @@
           if (!a.pinned && b.pinned) return 1;
           return ((a.title || '').toLowerCase()).localeCompare((b.title || '').toLowerCase());
         });
-        notes.forEach(function (n, i) { n.order = notes.length - i; });
+        var sortedAt = now();
+        notes.forEach(function (n, i) { n.order = notes.length - i; n.updatedAt = sortedAt; });
         persist(); renderBoard();
         toast('Sorted alphabetically', 'info');
       });
@@ -1472,7 +1888,7 @@
       if (!swatch) return;
       var color = swatch.dataset.color;
       var note = getNote(selectedNoteId);
-      if (note) { note.color = color; note.colorSource = 'manual'; persist(); renderBoard(); renderEditor(); }
+      if (note) { note.color = color; note.colorSource = 'manual'; note.updatedAt = now(); persist(); renderBoard(); renderEditor(); }
     });
 
     /* revision interval + mark reviewed (delegated) */
@@ -1485,6 +1901,7 @@
         note.revision.interval = parseInt(btn.dataset.interval, 10);
         var d = new Date(); d.setDate(d.getDate() + note.revision.interval);
         note.revision.nextReview = d.toISOString();
+        note.updatedAt = now();
         persist(); renderRevision(note); renderStats();
         return;
       }
@@ -1496,6 +1913,7 @@
         note2.revision.lastReviewed = now();
         var d2 = new Date(); d2.setDate(d2.getDate() + (note2.revision.interval || 1));
         note2.revision.nextReview = d2.toISOString();
+        note2.updatedAt = now();
         persist(); renderRevision(note2); renderStats();
         toast('Marked as reviewed \u2713', 'success');
       }
@@ -1770,7 +2188,7 @@
     if (folderEl) note.folderId = folderEl.value;
     if (catEl) note.category = catEl.value;
     note.updatedAt = now();
-    persist(); renderBoard(); renderStats(); renderSidebar();
+    persist({ immediate: true }); renderBoard(); renderStats(); renderSidebar();
     toast('Note saved \u2713', 'success');
   }
 
@@ -1778,9 +2196,10 @@
     var note = getNote(selectedNoteId);
     if (!note) return;
     if (!confirm('Delete "' + (note.title || 'Untitled') + '"? This cannot be undone.')) return;
-    notes = notes.filter(function (n) { return n.id !== selectedNoteId; });
+    var deletedNoteId = selectedNoteId;
+    notes = notes.filter(function (n) { return n.id !== deletedNoteId; });
     selectedNoteId = null;
-    persist(); renderAll();
+    persist({ deletedNoteId: deletedNoteId, immediate: true }); renderAll();
     toast('Note deleted', 'info');
   }
 
