@@ -82,3 +82,10 @@ assert.equal(values[0].length, 1);
 assert.equal(values[1].length, 2);
 
 console.log('Planner preview contracts passed');
+
+assert.match(generator, /cfg\.topics \|\| \{\}/);
+assert.match(generator, /topicConfigKey: topic\.configKey/);
+assert.match(wizard, /function pwTopicConfigKey/);
+assert.match(wizard, /function pwSelectedTopics/);
+assert.match(wizard, /Layer 4 ·/);
+assert.match(wizard, /cfg\.fourLayerPlanning = true;/);

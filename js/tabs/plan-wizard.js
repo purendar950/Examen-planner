@@ -8,7 +8,7 @@ const PW_STATE = {
   step: 1,
   type: null,                 /* 'syllabus' | 'practice' | 'mock' */
   name: '',
-  syllabus: { subId: null, subjects: {}, chapters: {}, order: 'sequential', endDateOverride: false, startDate: '', endDate: '', dailyHours: 4, topicsPerDay: 1 },
+  syllabus: { subId: null, subjects: {}, chapters: {}, topics: {}, order: 'sequential', endDateOverride: false, startDate: '', endDate: '', dailyHours: 4, topicsPerDay: 1 },
   practice: { subjects: [], practiceType: 'pyq', dailyTime: 2, questionsPerDay: 50, startDate: '' },
   mock:     { fullMockPerWeek: 1, subjectFreq: {}, subjectCount: {}, durationDays: 30, analysisDay: true }
 };
@@ -258,36 +258,123 @@ function pwEnsureChapterConf() {
       } else if (PW_STATE.syllabus.chapters[ch.id].order == null) {
         PW_STATE.syllabus.chapters[ch.id].order = i + 1;
       }
+
+      (ch.topics || []).forEach((topic, topicIndex) => {
+        const key = pwTopicConfigKey(sub.id, ch.id, topic.id || `${ch.id}-t${topicIndex}`);
+        if (!PW_STATE.syllabus.topics[key]) {
+          PW_STATE.syllabus.topics[key] = {
+            included: true,
+            size: effectiveTopicSize(topic, ch)
+          };
+        }
+      });
     });
   });
 }
 
-/* Auto-calculate end date using the PARALLEL timeline: subjects run
-   concurrently, so the plan length is the LONGEST single subject's span,
-   not the sum of all subjects. Per-subject span = (sum of its chapters'
-   days+gap) * frequency (alternate-day subjects take ~2x the calendar span). */
+/* ── Four-layer planning: Exam → Subject → Chapter → Topic ──
+   Topic configuration is keyed by subject+chapter+topic because legacy atomic
+   datasets reuse short IDs across subjects. Existing plans without this map
+   continue to include every topic. */
+function pwTopicConfigKey(subjectId, chapterId, topicId) {
+  return [subjectId, chapterId, topicId].map(value => encodeURIComponent(String(value))).join('|');
+}
+
+function pwTopicState(subjectId, chapterId, topic, topicIndex, chapter = null) {
+  const topicId = topic.id || `${chapterId}-t${topicIndex}`;
+  const key = pwTopicConfigKey(subjectId, chapterId, topicId);
+  const defaults = { included: true, size: effectiveTopicSize(topic, chapter) };
+  return { key, id: topicId, ...(defaults || {}), ...(PW_STATE.syllabus.topics[key] || {}) };
+}
+
+function pwUpdateTopicState(key, patch) {
+  PW_STATE.syllabus.topics[key] = {
+    included: true,
+    ...(PW_STATE.syllabus.topics[key] || {}),
+    ...patch
+  };
+}
+
+function pwToggleTopic(encodedKey, included) {
+  const key = decodeURIComponent(encodedKey);
+  pwUpdateTopicState(key, { included: !!included });
+  if (!PW_STATE.syllabus.endDateOverride) PW_STATE.syllabus.endDate = pwCalcEndDate();
+  pwRenderSyllabusSubjectPane();
+}
+
+function pwSetTopicSize(encodedKey, size) {
+  const key = decodeURIComponent(encodedKey);
+  pwUpdateTopicState(key, { included: true, size });
+  if (!PW_STATE.syllabus.endDateOverride) {
+    PW_STATE.syllabus.endDate = pwCalcEndDate();
+    const endInput = document.getElementById('pw-syl-end');
+    if (endInput) endInput.value = PW_STATE.syllabus.endDate;
+    const autoLabel = endInput?.nextElementSibling;
+    if (autoLabel) autoLabel.textContent = 'Auto: ' + PW_STATE.syllabus.endDate;
+  }
+}
+
+function pwToggleAllChapterTopics(subjectId, chapterId, included) {
+  const sub = getActiveSubjects().find(item => item.id === subjectId);
+  const chapter = sub?.chapters.find(item => item.id === chapterId);
+  if (!sub || !chapter) return;
+  (chapter.topics || []).forEach((topic, index) => {
+    const state = pwTopicState(sub.id, chapter.id, topic, index, chapter);
+    pwUpdateTopicState(state.key, { included });
+  });
+  if (!PW_STATE.syllabus.endDateOverride) PW_STATE.syllabus.endDate = pwCalcEndDate();
+  pwRenderSyllabusSubjectPane();
+}
+
+function pwSelectedTopics(sub, chapter) {
+  return (chapter.topics || [])
+    .map((topic, index) => ({ topic, index, state: pwTopicState(sub.id, chapter.id, topic, index, chapter) }))
+    .filter(item => item.state.included !== false)
+    .map(({ topic, index, state }) => ({
+      ...topic,
+      size: state.size || effectiveTopicSize(topic, chapter),
+      configKey: state.key,
+      sourceIndex: index
+    }));
+}
+
+/* Auto-calculate the end date from the selected fourth-layer topics.
+   Effort points mirror Safar: small=1, medium=2 and big=4. Each subject's own
+   daily-hours capacity is used, then its calendar frequency is applied. */
 function pwCalcEndDate() {
   pwEnsureChapterConf();
   const subs = pwPlanSubjects();
   const isSingle = PW_STATE.type === 'single';
-  const perDay = isSingle ? Math.max(1, parseInt(PW_STATE.syllabus.topicsPerDay, 10) || 1) : 1;
+  const perDay = isSingle ? Math.max(1, parseInt(PW_STATE.syllabus.topicsPerDay, 10) || 1) : 0;
   let maxSpan = 0;
+
   subs.forEach(sub => {
     let subDays = 0;
+    const frequency = Math.max(1, (PW_STATE.syllabus.subjectFreq && PW_STATE.syllabus.subjectFreq[sub.id]) || 1);
+
     if (isSingle) {
-      /* Single Subject: each chapter is one topic; pack `perDay` per day. */
-      const pendingCount = sub.chapters.filter(ch => !appState.progress[ch.id]?.done).length;
+      const pendingCount = sub.chapters.reduce((count, chapter) =>
+        count + (appState.progress[chapter.id]?.done ? 0 : pwSelectedTopics(sub, chapter).length), 0);
       subDays = Math.ceil(pendingCount / perDay);
     } else {
-      sub.chapters.forEach(ch => {
-        if (appState.progress[ch.id]?.done) return;
-        const c = PW_STATE.syllabus.chapters[ch.id] || { days: 3, gap: 0 };
-        subDays += (Number(c.days) || 3) + (Number(c.gap) || 0);
+      const capacity = Math.max(2, Math.round((Number(PW_STATE.syllabus.subjectHours?.[sub.id]) || 2) * 2));
+      let pendingPoints = 0;
+      sub.chapters.forEach(chapter => {
+        if (appState.progress[chapter.id]?.done) return;
+        if (Array.isArray(chapter.topics) && chapter.topics.length) {
+          pendingPoints += pwSelectedTopics(sub, chapter).reduce((sum, topic) =>
+            sum + effectiveTopicPoints(topic, chapter), 0);
+        } else {
+          const config = PW_STATE.syllabus.chapters[chapter.id] || { days: 3, gap: 0 };
+          if ((Number(config.days) || 3) > 0) pendingPoints += capacity * (Number(config.days) || 3);
+        }
       });
+      subDays = Math.ceil(pendingPoints / capacity);
     }
-    const freq = Math.max(1, (PW_STATE.syllabus.subjectFreq && PW_STATE.syllabus.subjectFreq[sub.id]) || 1);
-    maxSpan = Math.max(maxSpan, subDays * freq);
+
+    maxSpan = Math.max(maxSpan, subDays * frequency);
   });
+
   const start = new Date((PW_STATE.syllabus.startDate || fmtDate(new Date())) + 'T00:00:00');
   start.setDate(start.getDate() + Math.max(0, maxSpan - 1));
   return fmtDate(start);
@@ -353,6 +440,15 @@ function pwRenderSyllabusSubjectPane() {
   if (!pane || !sub) { if (pane) pane.innerHTML = ''; return; }
 
   /* Order dropdown (only meaningful with multiple subjects — hidden in Single mode) */
+  const examMeta = (typeof ALL_EXAMS !== 'undefined' && typeof currentExam !== 'undefined') ? ALL_EXAMS[currentExam] : null;
+  const breadcrumb = `
+    <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:.9rem;font-size:.7rem;color:var(--muted);">
+      <span style="padding:2px 7px;border:1px solid var(--border);border-radius:99px;background:var(--surface);color:var(--text);font-weight:700;">🎯 ${escapeHtml(examMeta?.badge || examMeta?.fullName || 'Exam')}</span><span>›</span>
+      <span style="padding:2px 7px;border:1px solid var(--border);border-radius:99px;background:var(--surface);color:${sub.color||'var(--accent)'};font-weight:700;">📚 ${escapeHtml(sub.name)}</span><span>›</span>
+      <span>${sub.chapters.length} chapters</span><span>›</span>
+      <span>${sub.chapters.reduce((sum,ch)=>sum+((Array.isArray(ch.topics)?ch.topics.length:0)||0),0)} topics</span>
+    </div>`;
+
   const orderSel = (PW_STATE.type === 'single') ? '' : `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:1rem;flex-wrap:wrap;">
       <span style="font-size:.78rem;color:var(--muted);font-weight:600;">Subject order:</span>
@@ -409,6 +505,8 @@ function pwRenderSyllabusSubjectPane() {
   /* Chapter table — rendered sorted by the user-chosen Order (#) so a row
      jumps to its new position as soon as the number changes. Ties / blanks
      keep the original syllabus order. */
+  const openChapters = new Set([...(pane?.querySelectorAll('details[data-chapter-id][open]') || [])]
+    .map(node => node.dataset.chapterId));
   const orderedChapters = sub.chapters
     .map((ch, i) => ({ ch, i, ord: Number((PW_STATE.syllabus.chapters[ch.id] || {}).order) || (i + 1) }))
     .sort((a, b) => (a.ord - b.ord) || (a.i - b.i))
@@ -417,47 +515,70 @@ function pwRenderSyllabusSubjectPane() {
     const c = PW_STATE.syllabus.chapters[ch.id];
     const diffColor = ch.diff==='Hard' ? 'var(--amber)' : ch.diff==='Medium' ? 'var(--blue)' : 'var(--accent)';
     const hasTopics = Array.isArray(ch.topics) && ch.topics.length > 0;
-    const topicSummary = hasTopics
-      ? `<span style="font-size:.62rem;color:var(--muted);display:block;margin-top:2px;">${ch.topics.map(t => {
-          const sz = (t.size || (ch.diff==='Hard'?'big':ch.diff==='Easy'?'small':'medium'));
-          const badge = sz==='big'?'🔴B':sz==='small'?'🟢S':'🟡M';
-          return `${badge} ${escapeHtml(t.name||'')}`;
-        }).join(' · ')}</span>`
-      : '';
+    const encodedSub = encodeURIComponent(sub.id);
+    const encodedCh = encodeURIComponent(ch.id);
+    const topicStates = hasTopics ? ch.topics.map((topic, index) => pwTopicState(sub.id, ch.id, topic, index, ch)) : [];
+    const selectedCount = topicStates.filter(state => state.included !== false).length;
+    const topicList = !hasTopics ? '' : `
+      <div style="margin-top:.55rem;display:flex;flex-direction:column;gap:5px;">
+        ${topicStates.map(state => {
+          const encodedKey = encodeURIComponent(state.key);
+          return `
+            <label style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:7px;padding:.35rem .45rem;background:var(--card);border:1px solid var(--border);border-radius:7px;" title="Safar effort weights: Small = 1 point, Medium = 2 points, Big = 4 points">
+              <input type="checkbox" ${state.included!==false?'checked':''}
+                     onchange="pwToggleTopic('${encodedKey}',this.checked)">
+              <span style="font-size:.74rem;line-height:1.25;">${escapeHtml(topic.name||'Untitled topic')}</span>
+              <select ${state.included===false?'disabled':''}
+                      onchange="pwSetTopicSize('${encodedKey}',this.value)"
+                      style="background:var(--surface);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:.66rem;padding:2px 4px;outline:none;font-family:var(--font);">
+                <option value="small" ${state.size==='small'?'selected':''}>S</option>
+                <option value="medium" ${state.size==='medium'?'selected':''}>M</option>
+                <option value="big" ${state.size==='big'?'selected':''}>B</option>
+              </select>
+            </label>`;
+        }).join('')}
+      </div>`;
+    const topicHeader = hasTopics ? `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:.35rem;">
+        <span style="font-size:.64rem;color:var(--muted);">Layer 4 · ${selectedCount}/${topicStates.length} topics selected</span>
+        <span style="display:flex;gap:4px;">
+          <button type="button" onclick="pwToggleAllChapterTopics('${encodedSub}','${encodedCh}',true)" style="border:1px solid var(--border);background:var(--surface);color:var(--accent);border-radius:5px;font-size:.6rem;padding:2px 6px;cursor:pointer;">All</button>
+          <button type="button" onclick="pwToggleAllChapterTopics('${encodedSub}','${encodedCh}',false)" style="border:1px solid var(--border);background:var(--surface);color:var(--muted);border-radius:5px;font-size:.6rem;padding:2px 6px;cursor:pointer;">None</button>
+        </span>
+      </div>` : '';
+
     return `
       <tr style="border-bottom:1px solid var(--border);">
-        <td style="padding:6px 8px;font-size:.8rem;">
-          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${sub.color||'var(--accent)'};margin-right:6px;"></span>
-          ${escapeHtml(ch.name)}
-          <span style="font-size:.65rem;color:${diffColor};margin-left:4px;">${ch.diff||''}</span>
-          ${topicSummary}
+        <td style="padding:7px 8px;font-size:.8rem;">
+          <details data-chapter-id="${escapeHtml(ch.id)}" ${openChapters.has(ch.id) || (hasTopics && topicStates.some(state => state.included===false))?'open':''}>
+            <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:7px;">
+              <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${sub.color||'var(--accent)'};"></span>
+              <strong>${escapeHtml(ch.name)}</strong>
+              <span style="font-size:.62rem;color:${diffColor};">${ch.diff||''}</span>
+              ${hasTopics?`<span style="font-size:.62rem;color:var(--muted);">${selectedCount}/${topicStates.length}</span>`:''}
+            </summary>
+            ${topicHeader}
+            ${topicList}
+          </details>
         </td>
         <td style="padding:6px 4px;">
           <input type="number" min="1" max="99" value="${c.order}"
-                 style="width:48px;background:var(--surface);border:1px solid var(--border);border-radius:6px;
-                        color:var(--text);font-size:.8rem;padding:3px 6px;outline:none;text-align:center;"
+                 style="width:48px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.8rem;padding:3px 6px;outline:none;text-align:center;"
                  title="Order — which chapter to study first (1 = first)"
                  oninput="pwUpdateChConf('${ch.id}','order',this.value)"
                  onchange="pwReorderChapter('${ch.id}',this.value)">
         </td>
         <td style="padding:6px 4px;">
           ${hasTopics ? `<span style="font-size:.68rem;color:var(--accent);font-weight:700;">⚡ auto</span>`
-            : `<input type="number" min="1" max="30" value="${c.days}"
-                 style="width:52px;background:var(--surface);border:1px solid var(--border);border-radius:6px;
-                        color:var(--text);font-size:.8rem;padding:3px 6px;outline:none;text-align:center;"
-                 oninput="pwUpdateChConf('${ch.id}','days',this.value)">`}
+            : `<input type="number" min="1" max="30" value="${c.days}" style="width:52px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.8rem;padding:3px 6px;outline:none;text-align:center;" oninput="pwUpdateChConf('${ch.id}','days',this.value)">`}
         </td>
         <td style="padding:6px 4px;">
           ${hasTopics ? `<span style="font-size:.68rem;color:var(--muted);">—</span>`
-            : `<input type="number" min="0" max="14" value="${c.gap}"
-                 style="width:52px;background:var(--surface);border:1px solid var(--border);border-radius:6px;
-                        color:var(--text);font-size:.8rem;padding:3px 6px;outline:none;text-align:center;"
-                 oninput="pwUpdateChConf('${ch.id}','gap',this.value)">`}
+            : `<input type="number" min="0" max="14" value="${c.gap}" style="width:52px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.8rem;padding:3px 6px;outline:none;text-align:center;" oninput="pwUpdateChConf('${ch.id}','gap',this.value)">`}
         </td>
         <td style="padding:6px 4px;">
           <input type="number" min="10" max="240" placeholder="${c.mins}" value="${c.minsOverride ? c.mins : ''}"
-                 style="width:58px;background:var(--surface);border:1px solid var(--border);border-radius:6px;
-                        color:var(--text);font-size:.8rem;padding:3px 6px;outline:none;text-align:center;"
+                 style="width:58px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.8rem;padding:3px 6px;outline:none;text-align:center;"
                  title="Optional: override minutes/day for this chapter"
                  oninput="pwUpdateChConf('${ch.id}','mins',this.value)">
         </td>
@@ -541,6 +662,7 @@ function pwRenderSyllabusSubjectPane() {
   }
 
   pane.innerHTML = `
+    ${breadcrumb}
     ${orderSel}
     ${freqSel}
     ${topicsInput}
@@ -785,6 +907,10 @@ function pwBuildSyllabusConfig() {
   cfg.dailyHours = PW_STATE.syllabus.dailyHours;
   cfg.order      = PW_STATE.syllabus.order || 'sequential';
   cfg.chapters   = JSON.parse(JSON.stringify(PW_STATE.syllabus.chapters || {}));
+  cfg.topics     = JSON.parse(JSON.stringify(PW_STATE.syllabus.topics || {}));
+  cfg.examId     = typeof currentExam !== 'undefined' ? currentExam : null;
+  cfg.hierarchyVersion = 4;
+  cfg.fourLayerPlanning = true;
   cfg.subjectFreq = JSON.parse(JSON.stringify(PW_STATE.syllabus.subjectFreq || {}));
   cfg.subjectHours = JSON.parse(JSON.stringify(PW_STATE.syllabus.subjectHours || {}));
   cfg.restDays = planRestDays(cfg);
@@ -905,16 +1031,12 @@ function pwShowStep3Summary() {
     const subs = pwPlanSubjects();
     const chConf = PW_STATE.syllabus.chapters || {};
     const rows = subs.map(sub => {
-      const pending = sub.chapters.filter(c => !appState.progress[c.id]?.done);
-      let studyDays = 0, revDays = 0;
-      pending.forEach(ch => {
-        const c = chConf[ch.id] || { days: 3, gap: 0 };
-        studyDays += Number(c.days) || 3;
-        revDays   += Number(c.gap)  || 0;
-      });
+      const activeChapters = sub.chapters.filter(c => !appState.progress[c.id]?.done);
+      const topicTotal = activeChapters.reduce((sum,c)=>sum+(Array.isArray(c.topics)?c.topics.length:0),0);
+      const topicSelected = activeChapters.reduce((sum,c)=>sum+pwSelectedTopics(sub,c).length,0);
       return `<div class="confirm-row">
         <span>${escapeHtml(sub.name)}</span>
-        <span><strong>${pending.length}</strong> ch · <strong>${studyDays}</strong> study + <strong>${revDays}</strong> 🔁 rev days</span>
+        <span><strong>${activeChapters.length}</strong> ch · <strong>${topicSelected}/${topicTotal}</strong> topics</span>
       </div>`;
     }).join('');
     const orderLabel = (PW_STATE.syllabus.order === 'interleave') ? '🔀 Mix / Interleave' : '📚 Subject-by-subject';
@@ -1020,7 +1142,7 @@ function pwGenerate() {
     }
     if (PW_STATE.type === 'syllabus') {
       const n = Object.keys(cfg.chapters || {}).length;
-      return `Syllabus — ${n} chapter${n===1?'':'s'}, ${cfg.dailyHours}h/day`;
+      return `Syllabus — ${Object.keys(cfg.topics || {}).length} topics, ${cfg.dailyHours}h/day`;
     }
     if (PW_STATE.type === 'practice') {
       const t = cfg.practiceType === 'pyq' ? 'PYQ' : cfg.practiceType === 'topicmcq' ? 'Topic MCQ' : 'Mixed';
@@ -1044,8 +1166,9 @@ function pwGenerate() {
       existing.name = finalName;
       existing.updatedAt = new Date().toISOString();
       existing.cfg = JSON.parse(JSON.stringify(cfg));
-      existing.plannerVersion = 2;
+      existing.plannerVersion = 3;
       existing.weightedPlanning = true;
+      existing.fourLayerPlanning = true;
       appState.activePlanId = existing.id;
       window._activePlanId = existing.id;
       window._planSchedule = null; /* force rebuild for the edited plan */
@@ -1074,8 +1197,9 @@ function pwGenerate() {
     name: finalName,
     exam: (typeof currentExam !== 'undefined' ? currentExam : null),
     createdAt: new Date().toISOString(),
-    plannerVersion: 2,
+    plannerVersion: 3,
     weightedPlanning: true,
+    fourLayerPlanning: true,
     cfg: JSON.parse(JSON.stringify(cfg))
   };
   appState.plans.push(newPlan);
@@ -1106,13 +1230,15 @@ function planShortSummary(p) {
     let nm = 'Subject';
     try { const s = getActiveSubjects().find(x => x.id === cfg.scopeSubId); if (s) nm = s.name; } catch(e) {}
     const n = Object.keys(cfg.chapters || {}).length;
-    return `${nm} · ${cfg.dailyHours || '?'}h/day`;
+    const topics = Object.values(cfg.topics || {}).filter(topic => topic?.included !== false).length;
+    return `${nm} · ${topics} topics · ${cfg.dailyHours || '?'}h/day`;
   }
   if (p.type === 'syllabus') {
     const chapters = cfg.chapters || {};
     const n = (cfg.subjects ? cfg.subjects.length : Object.keys(chapters).length);
     const unit = cfg.subjects ? (n===1?'subject':'subjects') : (n===1?'chapter':'chapters');
-    return `${n} ${unit} · ${cfg.dailyHours || '?'}h/day`;
+    const topics = Object.values(cfg.topics || {}).filter(topic => topic?.included !== false).length;
+    return `${topics} topics · ${cfg.dailyHours || '?'}h/day`;
   }
   if (p.type === 'practice') {
     const t = cfg.practiceType === 'pyq' ? 'PYQ' : cfg.practiceType === 'topicmcq' ? 'Topic MCQ' : 'Mixed';
@@ -1207,6 +1333,7 @@ function editPlan(planId) {
     PW_STATE.syllabus.dailyHours     = cfg.dailyHours || PW_STATE.syllabus.dailyHours;
     PW_STATE.syllabus.order          = cfg.order || 'sequential';
     PW_STATE.syllabus.chapters       = cfg.chapters     || {};
+    PW_STATE.syllabus.topics         = cfg.topics       || {};
     PW_STATE.syllabus.subjectFreq    = cfg.subjectFreq  || {};
     PW_STATE.syllabus.subjectHours   = cfg.subjectHours || {};
     /* Single Subject: restore which subject this plan is scoped to. */
