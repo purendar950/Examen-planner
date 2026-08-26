@@ -264,6 +264,20 @@ def refresh_cookies():
         return _HAS_COOKIES
 
 
+def _youtube_cookie_help():
+    """Return operator guidance that matches the cookie source in /health."""
+    if _cookie_source == "firestore":
+        return "This video is bot-gated. Update the YouTube cookies in the admin panel."
+    if _cookie_source == "env":
+        return ("This video is bot-gated. Replace the YT_COOKIES environment "
+                "secret, then restart or redeploy the service.")
+    if _cookie_source == "file":
+        return ("This video is bot-gated. Replace the configured YouTube cookie "
+                "file, then restart the service.")
+    return ("This video is bot-gated. Configure fresh YouTube cookies in the "
+            "Render dashboard or admin panel.")
+
+
 def _cookie_refresh_loop():
     while True:
         time.sleep(COOKIE_REFRESH_SEC)
@@ -904,6 +918,8 @@ def _normalize(info):
         # We need a PROGRESSIVE, SINGLE-FILE stream that a native <video> can
         # play through the byte-proxy: both audio + video, and a plain http(s)
         # download (NOT HLS m3u8 or DASH segments, which need hls.js / MSE).
+        if not f.get("format_id"):
+            continue
         if f.get("vcodec") in (None, "none"):
             continue
         if f.get("acodec") in (None, "none"):
@@ -1032,7 +1048,40 @@ def _compact_extract(raw):
     }
 
 
-def _extract(video_id, force=False, cookie_retry_budget=None, deadline=None):
+def _progressive_ydl_opts(base_opts):
+    """Return a cookie-less yt-dlp profile that asks for one-file MP4 streams."""
+    opts = dict(base_opts)
+    opts.pop("cookiefile", None)
+    extractor_args = {
+        name: dict(values)
+        for name, values in (opts.get("extractor_args") or {}).items()
+    }
+    youtube_args = dict(extractor_args.get("youtube") or {})
+    youtube_args["player_client"] = ["android_vr"]
+    extractor_args["youtube"] = youtube_args
+    opts["extractor_args"] = extractor_args
+    return opts
+
+
+def _has_direct_format(info, compact, required_itag=None):
+    """Verify every browser-visible itag resolves in this exact extraction."""
+    formats = info.get("formats") or []
+    if not formats:
+        return False
+    compact_itags = {
+        str(fmt.get("format_id"))
+        for fmt in compact.get("formats") or []
+        if fmt.get("format_id") and fmt.get("url")
+    }
+    visible_itags = {fmt.get("itag") for fmt in formats if fmt.get("itag")}
+    if not visible_itags or not visible_itags.issubset(compact_itags):
+        return False
+    return required_itag is None or str(required_itag) in visible_itags
+
+
+def _extract(video_id, force=False, cookie_retry_budget=None, deadline=None,
+             required_itag=None, failed_generation=None,
+             invalidate_failed_generation=False):
     # Endpoints that can call _extract more than once share this mutable budget,
     # so one browser request can never trigger multiple cookie-less fallbacks.
     if cookie_retry_budget is None:
@@ -1053,9 +1102,22 @@ def _extract(video_id, force=False, cookie_retry_budget=None, deadline=None):
             hit = _cache.get(video_id)
             if hit and not force and (time.time() - hit["ts"] < CACHE_TTL):
                 return hit["info"], hit["compact"]
+            # A second request may have waited behind a refresh of the same
+            # rejected generation. Reuse that newer matching generation rather
+            # than launching another extraction or invalidating fresh work.
+            if (force and failed_generation is not None and hit
+                    and hit.get("compact") is not failed_generation
+                    and _has_direct_format(hit["info"], hit["compact"],
+                                           required_itag)):
+                return hit["info"], hit["compact"]
+            previous = hit
+            failed_generation_is_current = bool(
+                previous and previous.get("compact") is failed_generation
+            )
 
         url = "https://www.youtube.com/watch?v=" + video_id
         ydl_opts = _base_ydl_opts()
+        used_progressive_profile = False
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 raw = ydl.extract_info(url, download=False)
@@ -1063,9 +1125,7 @@ def _extract(video_id, force=False, cookie_retry_budget=None, deadline=None):
             # YouTube currently returns this exact false UNPLAYABLE response for
             # some public videos when account cookies are supplied. Keep the
             # cookie-first request for restricted videos, but retry this one
-            # known cookie-specific failure once without cookies. Never broaden
-            # the retry to bot gates, network failures, or unrelated extractor
-            # errors, which have their own handling at the API boundary.
+            # known cookie-specific failure once without cookies.
             message = " ".join(str(exc).split())
             reload_messages = {
                 f"ERROR: [youtube] {video_id}: The page needs to be reloaded.",
@@ -1079,34 +1139,67 @@ def _extract(video_id, force=False, cookie_retry_budget=None, deadline=None):
             if not can_retry:
                 raise
             cookie_retry_budget["remaining"] -= 1
+            used_progressive_profile = True
             log.warning(
                 "Cookie-authenticated extraction requested a page reload for %s; retrying once without cookies using a progressive client.",
                 video_id,
             )
-            cookie_less_opts = dict(ydl_opts)
-            cookie_less_opts.pop("cookiefile", None)
-            # Current cookie-less default clients can return only split
-            # video+audio tracks (for example 616+251-2). Turbo deliberately
-            # proxies one range-addressable file into one native <video>, so
-            # request android_vr here: it exposes progressive MP4 itag 18 with
-            # H.264 video + AAC audio over HTTPS. Merge rather than replace the
-            # extractor args so the JS solver and bgutil PO-token settings stay.
-            retry_extractor_args = {
-                name: dict(values)
-                for name, values in (cookie_less_opts.get("extractor_args") or {}).items()
-            }
-            youtube_args = dict(retry_extractor_args.get("youtube") or {})
-            youtube_args["player_client"] = ["android_vr"]
-            retry_extractor_args["youtube"] = youtube_args
-            cookie_less_opts["extractor_args"] = retry_extractor_args
-            with yt_dlp.YoutubeDL(cookie_less_opts) as ydl:
+            with yt_dlp.YoutubeDL(_progressive_ydl_opts(ydl_opts)) as ydl:
                 raw = ydl.extract_info(url, download=False)
+
         info = _normalize(raw)
         compact = _compact_extract(raw)
         del raw
+
+        # A default-client extraction may technically succeed while exposing
+        # only split DASH tracks. Turbo needs one progressive audio+video file,
+        # so try the bounded android_vr profile in that case too. This also keeps
+        # a stream refresh tied to the exact itag advertised by /api/info.
+        if (not used_progressive_profile
+                and not _has_direct_format(info, compact, required_itag)
+                and cookie_retry_budget.get("remaining", 0) > 0):
+            cookie_retry_budget["remaining"] -= 1
+            log.warning(
+                "Extraction for %s had no usable%s progressive stream; retrying once with the progressive client.",
+                video_id,
+                " itag " + str(required_itag) if required_itag else "",
+            )
+            try:
+                with yt_dlp.YoutubeDL(_progressive_ydl_opts(ydl_opts)) as ydl:
+                    retry_raw = ydl.extract_info(url, download=False)
+                retry_info = _normalize(retry_raw)
+                retry_compact = _compact_extract(retry_raw)
+                del retry_raw
+                if _has_direct_format(retry_info, retry_compact, required_itag):
+                    info, compact = retry_info, retry_compact
+            except yt_dlp.utils.DownloadError as exc:
+                # The original extraction remains the best available result.
+                # Its empty/different format set is handled at the API boundary.
+                log.warning("Progressive extraction retry failed for %s: %s",
+                            video_id, str(exc)[:200])
+
+        usable = _has_direct_format(info, compact, required_itag)
         with _cache_lock:
-            _cache[video_id] = {"ts": time.time(), "info": info, "compact": compact}
-            _prune_ts_cache(_cache, VIDEO_CACHE_MAX)
+            if usable:
+                _cache[video_id] = {
+                    "ts": time.time(),
+                    "info": info,
+                    "compact": compact,
+                }
+                _prune_ts_cache(_cache, VIDEO_CACHE_MAX)
+            elif (invalidate_failed_generation and previous
+                  and failed_generation_is_current):
+                # Expire only the exact cache object whose signed URL produced
+                # this request's 403/410. A queued refresh must never expire a
+                # newer generation installed while it waited on the semaphore.
+                previous["ts"] = 0
+                log.warning(
+                    "Turbo refresh for %s did not reproduce itag %s; expiring its rejected cache generation.",
+                    video_id,
+                    required_itag or "(any progressive format)",
+                )
+            # Unusable first extractions and old client-supplied itags are not
+            # cached or allowed to invalidate an unrelated current generation.
     return info, compact
 
 
@@ -7120,7 +7213,7 @@ def api_info():
                 except Exception:  # noqa: BLE001
                     pass
             return jsonify({"error": "youtube_bot_check",
-                            "detail": "This video is bot-gated. Update the YouTube cookies in the admin panel."}), 403
+                            "detail": _youtube_cookie_help()}), 403
         return jsonify({"error": "extract_failed", "detail": msg[:300]}), 502
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "server_error", "detail": str(exc)[:300]}), 500
@@ -7170,7 +7263,7 @@ def api_transcript():
                 except Exception:  # noqa: BLE001
                     pass
             return jsonify({"error": "youtube_bot_check",
-                            "detail": "This video is bot-gated. Update the YouTube cookies in the admin panel."}), 403
+                            "detail": _youtube_cookie_help()}), 403
         return jsonify({"error": "extract_failed", "detail": msg[:300]}), 502
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "server_error", "detail": str(exc)[:300]}), 500
@@ -15711,6 +15804,7 @@ def api_stream():
                 video_id,
                 force=True,
                 cookie_retry_budget=cookie_retry_budget,
+                required_itag=itag,
             )
             stream_format = _direct_format(raw, itag)
         if not stream_format:
@@ -15773,6 +15867,9 @@ def api_stream():
                 video_id,
                 force=True,
                 cookie_retry_budget=cookie_retry_budget,
+                required_itag=itag,
+                failed_generation=raw,
+                invalidate_failed_generation=True,
             )
             refreshed_format = _direct_format(raw, itag)
         except Exception:  # noqa: BLE001
