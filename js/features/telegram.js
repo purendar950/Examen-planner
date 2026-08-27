@@ -602,6 +602,8 @@ function drainMockAttempts(snapData) {
           mockAttemptInbox: latestInbox.filter(item => !handledIds.has(String(item && item.id || '')))
         });
       });
+    }).finally(() => {
+      if (typeof _localDirty !== 'undefined') _localDirty = false;
     }).catch(() => { /* Keep the queue intact; a later snapshot retries safely. */ });
 
     if (added) {

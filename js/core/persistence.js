@@ -282,6 +282,28 @@ function setYouTubeLastVideo(video, updatedAt) {
 function applyMergedCloudState(target, source) {
   if (!target || !source) return target;
   const restored = JSON.parse(JSON.stringify(source));
+  if (target.mocks && restored.mocks && typeof target.mocks === 'object' && typeof restored.mocks === 'object') {
+    const mergedMocks = JSON.parse(JSON.stringify(target.mocks));
+    Object.keys(restored.mocks).forEach(function(exam) {
+      const localTiers = mergedMocks[exam] && typeof mergedMocks[exam] === 'object' ? mergedMocks[exam] : {};
+      const remoteTiers = restored.mocks[exam] && typeof restored.mocks[exam] === 'object' ? restored.mocks[exam] : {};
+      const tiers = new Set(Object.keys(localTiers).concat(Object.keys(remoteTiers)));
+      mergedMocks[exam] = {};
+      tiers.forEach(function(tier) {
+        const localAttempts = Array.isArray(localTiers[tier]) ? localTiers[tier] : [];
+        const remoteAttempts = Array.isArray(remoteTiers[tier]) ? remoteTiers[tier] : [];
+        const attemptsById = new Map();
+        remoteAttempts.forEach(function(attempt) {
+          if (attempt && attempt.id != null) attemptsById.set(String(attempt.id), attempt);
+        });
+        localAttempts.forEach(function(attempt) {
+          if (attempt && attempt.id != null) attemptsById.set(String(attempt.id), attempt);
+        });
+        mergedMocks[exam][tier] = Array.from(attemptsById.values());
+      });
+    });
+    restored.mocks = mergedMocks;
+  }
   if (restored.focusMarks && typeof restored.focusMarks === 'object') {
     Object.keys(restored.focusMarks).forEach(function(key) {
       const entry = restored.focusMarks[key];
@@ -700,4 +722,3 @@ document.addEventListener('visibilitychange', function() {
 });
 window.addEventListener('pagehide', flushSaveOnExit);
 window.addEventListener('beforeunload', flushSaveOnExit);
-

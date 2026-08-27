@@ -19,6 +19,35 @@ function syncFieldRecord(value) {
   return { updatedAt: Math.max(0, Number(value) || 0), deleted: false, pending: false };
 }
 
+function mergeMockState(localMocks, remoteMocks) {
+  const local = localMocks && typeof localMocks === 'object' ? localMocks : {};
+  const remote = remoteMocks && typeof remoteMocks === 'object' ? remoteMocks : {};
+  const merged = {};
+  const exams = new Set([...Object.keys(remote), ...Object.keys(local)]);
+
+  exams.forEach(exam => {
+    const localTiers = local[exam] && typeof local[exam] === 'object' ? local[exam] : {};
+    const remoteTiers = remote[exam] && typeof remote[exam] === 'object' ? remote[exam] : {};
+    const tiers = new Set([...Object.keys(remoteTiers), ...Object.keys(localTiers)]);
+    merged[exam] = {};
+
+    tiers.forEach(tier => {
+      const localAttempts = Array.isArray(localTiers[tier]) ? localTiers[tier] : [];
+      const remoteAttempts = Array.isArray(remoteTiers[tier]) ? remoteTiers[tier] : [];
+      const byId = new Map();
+      remoteAttempts.forEach(attempt => {
+        if (attempt && attempt.id != null) byId.set(String(attempt.id), attempt);
+      });
+      localAttempts.forEach(attempt => {
+        if (attempt && attempt.id != null) byId.set(String(attempt.id), attempt);
+      });
+      merged[exam][tier] = Array.from(byId.values());
+    });
+  });
+
+  return merged;
+}
+
 /* Merge appState domains by the revision metadata stamped at save time. This
    keeps the persisted shape backward-compatible while preventing an edit to,
    for example, habits on one upgraded device from replacing newer tasks on
@@ -86,6 +115,10 @@ export function mergeAppStateByRevision(localState, remoteState) {
       };
     }
   });
+
+  if (Object.prototype.hasOwnProperty.call(local, 'mocks') || Object.prototype.hasOwnProperty.call(remote, 'mocks')) {
+    merged.mocks = mergeMockState(local.mocks, remote.mocks);
+  }
 
   if (Object.keys(mergedFields).length) {
     merged._syncMeta = { version: 2, revision: commitRevision, fields: mergedFields };
