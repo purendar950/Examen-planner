@@ -20,6 +20,52 @@ function mockToggleSaved() {
   if (chev) chev.style.transform = 'rotate(' + (mockSavedOpen ? '180' : '0') + 'deg)';
 }
 
+function mockComparisonWindow() {
+  const key = 'mockCompareWindow:' + currentExam + ':' + mockTierKey();
+  const raw = (typeof localStorage !== 'undefined') ? localStorage.getItem(key) : '';
+  const allowed = ['3', '5', '10', 'all'];
+  return allowed.includes(raw) ? raw : '5';
+}
+
+function mockSetComparisonWindow(value) {
+  const allowed = ['3', '5', '10', 'all'];
+  const next = allowed.includes(value) ? value : '5';
+  const key = 'mockCompareWindow:' + currentExam + ':' + mockTierKey();
+  try { localStorage.setItem(key, next); } catch (e) {}
+  mockRenderPage();
+}
+
+function mockComparisonCount(list) {
+  const raw = mockComparisonWindow();
+  if (raw === 'all') return list.length;
+  return Math.max(1, Math.min(list.length, parseInt(raw, 10) || 5));
+}
+
+function mockAttemptMetrics(attempt, tier) {
+  let attempts = 0, correct = 0, wrong = 0, negLost = 0;
+  const rows = {};
+  tier.sections.forEach(section => {
+    const value = attempt.s && attempt.s[section.k] ? attempt.s[section.k] : {};
+    const c = Number(value.c) || 0;
+    const w = Number(value.w) || 0;
+    const m = value.m != null ? Number(value.m) : 0;
+    const lost = w * ((section.neg != null) ? section.neg : tier.neg);
+    attempts += c + w;
+    correct += c;
+    wrong += w;
+    negLost += lost;
+    rows[section.k] = { c: c, w: w, m: m, accuracy: (c + w) > 0 ? Math.round(c / (c + w) * 100) : null, negLost: Math.round(lost * 100) / 100 };
+  });
+  return {
+    attempts: attempts,
+    correct: correct,
+    wrong: wrong,
+    accuracy: attempts > 0 ? Math.round(correct / attempts * 100) : null,
+    negLost: Math.round(negLost * 100) / 100,
+    rows: rows
+  };
+}
+
 function mockTrendSvg(list, totalMax) {
   const W = 640, H = 200, P = 32;
   const n = list.length;
@@ -50,6 +96,8 @@ function mockRenderAnalysis() {
   const tier = cfg.tiers[mockTierKey()];
   const list = mockList().slice().sort((a, b) => new Date(a.date) - new Date(b.date));
   if (!list.length) { el.innerHTML = ''; return; }
+  const compareCount = mockComparisonCount(list);
+  const compareList = list.slice(-compareCount);
   const totalMax = tier.sections.reduce((t, s) => t + s.max, 0);
   const totals = list.map(m => m.total);
   const best = Math.max.apply(null, totals);
@@ -93,6 +141,26 @@ function mockRenderAnalysis() {
         return { name: s.name, score: Math.round(score * 10) / 10, share: Math.round(share * 10) / 10, gap: Math.round((score - share) * 10) / 10 };
       })
     : [];
+  const compareMetrics = compareList.map(attempt => mockAttemptMetrics(attempt, tier));
+  const compareRows = tier.sections.map(section => {
+    const values = compareList.map(attempt => {
+      const entry = attempt.s && attempt.s[section.k] ? attempt.s[section.k] : {};
+      return {
+        marks: Number(entry.m) || 0,
+        accuracy: (Number(entry.c) || 0) + (Number(entry.w) || 0) > 0 ? Math.round((Number(entry.c) || 0) / ((Number(entry.c) || 0) + (Number(entry.w) || 0)) * 100) : null,
+        negLost: Math.round((Number(entry.w) || 0) * ((section.neg != null) ? section.neg : tier.neg) * 100) / 100
+      };
+    });
+    return {
+      section: section,
+      first: values[0],
+      last: values[values.length - 1],
+      values: values,
+      delta: values.length > 1 ? Math.round((values[values.length - 1].marks - values[0].marks) * 10) / 10 : 0,
+      accDelta: values.length > 1 && values[0].accuracy != null && values[values.length - 1].accuracy != null ? values[values.length - 1].accuracy - values[0].accuracy : null,
+      negDelta: values.length > 1 ? Math.round((values[values.length - 1].negLost - values[0].negLost) * 10) / 10 : 0
+    };
+  });
 
   el.innerHTML =
     /* Section title */
@@ -121,8 +189,45 @@ function mockRenderAnalysis() {
     /* ROW 5: Mock comparison table (last 3 attempts, full-width) */
     mockMockComparisonTableHtml(list, tier, totalMax) +
 
-    /* ROW 6: Attempt-rate vs hit-rate strategy trends per section */
+    /* ROW 6: Flexible comparison window */
+    mockComparisonCardHtml(compareList, compareMetrics, compareRows) +
+
+    /* ROW 7: Attempt-rate vs hit-rate strategy trends per section */
     mockPerSectionAccuracyTrendHtml(list, tier, weakest);
+}
+
+function mockComparisonCardHtml(compareList, compareMetrics, compareRows) {
+  const current = mockComparisonWindow();
+  const buttons = ['3', '5', '10', 'all'].map(value =>
+    '<button class="exam-select-btn' + (current === value ? ' active' : '') + '" onclick="mockSetComparisonWindow(\'' + value + '\')">' + (value === 'all' ? 'All' : 'Last ' + value) + '</button>'
+  ).join(' ');
+  const label = attempt => String((attempt && attempt.name) || 'Mock');
+  const header = compareList.map(attempt => '<th>' + escapeHtml(label(attempt).slice(0, 14)) + '<br><span style="font-weight:500;text-transform:none;color:var(--muted);">' + escapeHtml(String((attempt && attempt.date) || '')) + '</span></th>').join('');
+  const sectionRows = compareRows.map(row => {
+    const cells = row.values.map(value => '<td><strong style="color:var(--accent);">' + value.marks + '</strong><br><span style="color:var(--muted);font-size:0.72rem;">Acc ' + (value.accuracy == null ? '—' : value.accuracy + '%') + ' · −' + value.negLost + '</span></td>').join('');
+    const accDelta = row.accDelta == null
+      ? ''
+      : ' · acc ' + (row.accDelta >= 0 ? '+' : '') + row.accDelta + '%';
+    const negDelta = ' · neg ' + (row.negDelta > 0 ? '+' : '') + row.negDelta;
+    return '<tr><td><strong>' + escapeHtml(row.section.name) + '</strong><br><span style="color:var(--muted);font-size:0.72rem;">Δ ' + (row.delta >= 0 ? '+' : '') + row.delta + ' marks' + accDelta + negDelta + '</span></td>' + cells + '</tr>';
+  }).join('');
+  const summary = compareMetrics.map((item, index) =>
+    '<div class="tag" style="background:var(--surface);color:var(--text);border:1px solid var(--border);">' +
+      escapeHtml(label(compareList[index]).slice(0, 18)) + ': <strong style="margin-left:4px;color:var(--accent);">' + item.attempts + '</strong> attempted, <strong style="margin-left:4px;color:var(--accent);">' + (item.accuracy == null ? '—' : item.accuracy + '%') + '</strong> acc, <strong style="margin-left:4px;color:' + (item.negLost > 0 ? 'var(--red)' : 'var(--accent)') + ';">−' + item.negLost + '</strong>' +
+    '</div>'
+  ).join(' ');
+  return '<div class="info-card" style="margin-bottom:1rem;">' +
+    '<h3>🔎 Flexible mock comparison</h3>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center;">' +
+      '<span style="font-size:0.74rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;">Compare:</span>' + buttons +
+    '</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">' + summary + '</div>' +
+    '<div class="table-wrap"><table class="mock-compare-tbl">' +
+      '<thead><tr><th>Section</th>' + header + '</tr></thead>' +
+      '<tbody>' + sectionRows + '</tbody>' +
+    '</table></div>' +
+    '<div style="font-size:0.74rem;color:var(--muted);margin-top:10px;">Marks, accuracy, and negative marking are shown for each selected mock. Δ is the change from the oldest selected mock to the latest.</div>' +
+  '</div>';
 }
 
 /* ── 5 metric cards row ── */
@@ -789,4 +894,3 @@ updateDashboard = function() {
   _updateDashboardMocks();
   mockUpdateDashSummary();
 };
-
