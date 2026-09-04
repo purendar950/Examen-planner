@@ -57,7 +57,8 @@ const ADMIN_TABS = {
   coupons:    { crumb: 'Coupons',           title: 'Coupons',             description: 'Create promotions and review usage, discounts and redemptions.' },
   telegram:   { crumb: 'Telegram',          title: 'Telegram automation', description: 'Configure bots, delivery schedules, report channels and connected users.' },
   aistudy:    { crumb: 'AI Study',          title: 'AI Study operations', description: 'Operate provider routing, model allocation, feature access and quota controls.' },
-  settings:   { crumb: 'Settings',          title: 'System settings',      description: 'Control registration, maintenance, announcements and service health.' }
+  settings:   { crumb: 'Settings',          title: 'System settings',      description: 'Control registration, maintenance, announcements and service health.' },
+  dnsAdblock: { crumb: 'DNS AdBlock',       title: 'YouTube DNS AdBlock',   description: 'Manage ControlD DNS resolver entries per platform for network-wide YouTube ad blocking.' }
 };
 
 function showToast(msg, tone) {
