@@ -1,0 +1,5 @@
+Touched by the Supabase Keep-Alive workflow to stop GitHub
+disabling its schedule after 60 days of repo inactivity.
+See .github/workflows/supabase-keepalive.yml
+
+last_touched: 2026-10-13T10:29:21Z
